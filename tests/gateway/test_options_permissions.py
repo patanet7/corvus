@@ -63,12 +63,15 @@ def test_can_use_tool_emits_ws_permission_decision_for_allow() -> None:
 
     result = asyncio.run(callback("Bash", {"command": "pwd"}, ToolPermissionContext()))
     assert isinstance(result, PermissionResultAllow)
-    assert len(captured) == 1
+    # Two WS messages: tool_permission_decision + confirm_request (confirm-gated tool)
+    assert len(captured) == 2
     assert captured[0]["type"] == "tool_permission_decision"
     assert captured[0]["agent"] == "docs"
     assert captured[0]["tool"] == "Bash"
     assert captured[0]["allowed"] is True
     assert captured[0]["state"] == "confirm"
+    assert captured[1]["type"] == "confirm_request"
+    assert captured[1]["tool"] == "Bash"
 
 
 def test_can_use_tool_emits_ws_permission_decision_for_deny() -> None:

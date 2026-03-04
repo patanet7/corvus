@@ -89,8 +89,8 @@ class TestFullStackIntegration:
         # resolve_model with skill should return skill's model
         assert router.resolve_model(agent_name="finance", skill_name="data-transform") == "haiku"
 
-    def test_confirm_gate_emits_and_blocks(self, tmp_path: Path):
-        """PreToolUse confirm-gates emit events AND return confirm decision."""
+    def test_formerly_gated_tool_passes_through_hooks(self, tmp_path: Path):
+        """PreToolUse passes through for formerly confirm-gated tools (gating moved to can_use_tool)."""
         log = tmp_path / "events.jsonl"
         emitter = EventEmitter()
         emitter.register_sink(JSONLFileSink(log))
@@ -103,11 +103,16 @@ class TestFullStackIntegration:
                 None,
             )
         )
-        assert result["decision"] == "confirm"
+        # Hook passes through — confirm-gating handled by can_use_tool now
+        assert result == {}
 
-        event = json.loads(log.read_text().strip())
-        assert event["event_type"] == "confirm_gate"
-        assert event["metadata"]["tool"] == "mcp__ha__ha_call_service"
+        # No confirm_gate event emitted by hooks anymore
+        if log.exists():
+            log_text = log.read_text().strip()
+            if log_text:
+                for line in log_text.splitlines():
+                    event = json.loads(line)
+                    assert event["event_type"] != "confirm_gate"
 
     def test_security_block_emits_event(self, tmp_path: Path):
         """PreToolUse blocks .env reads AND emits security_block event."""

@@ -178,8 +178,8 @@ class TestHookToolEvents:
         assert tool_starts[0]["tool"] == "Bash"
         assert "call_id" in tool_starts[0]
 
-    def test_pre_tool_use_emits_confirm_request_via_callback(self):
-        """pre_tool_use hook emits confirm_request for confirm-gated tools."""
+    def test_pre_tool_use_emits_tool_start_for_formerly_gated_tool(self):
+        """pre_tool_use hook passes through for confirm-gated tools (gating moved to can_use_tool)."""
         emitter = EventEmitter()
         collected = []
 
@@ -196,15 +196,14 @@ class TestHookToolEvents:
             )
         )
 
-        # Confirm decision is still returned
-        assert result["decision"] == "confirm"
+        # Hook passes through (confirm-gating handled by can_use_tool now)
+        assert result == {}
 
-        # confirm_request emitted via callback
-        confirm_msgs = [m for m in collected if m["type"] == "confirm_request"]
-        assert len(confirm_msgs) == 1
-        assert confirm_msgs[0]["tool"] == "mcp__email__email_send"
-        assert confirm_msgs[0]["timeout_s"] == 60
-        assert "call_id" in confirm_msgs[0]
+        # tool_start emitted instead of confirm_request
+        tool_starts = [m for m in collected if m["type"] == "tool_start"]
+        assert len(tool_starts) == 1
+        assert tool_starts[0]["tool"] == "mcp__email__email_send"
+        assert "call_id" in tool_starts[0]
 
     def test_post_tool_use_emits_tool_result_via_callback(self):
         """post_tool_use hook emits tool_result via ws_callback."""
@@ -275,7 +274,7 @@ class TestHookToolEvents:
                 None,
             )
         )
-        assert result["decision"] == "confirm"
+        assert result == {}
 
     def test_event_emitter_still_works_with_ws_callback(self, tmp_path):
         """Event emitter logs are still written when ws_callback is also present."""
@@ -391,8 +390,8 @@ class TestCallIdMatching:
         assert len(tool_results) == 1
         assert tool_results[0]["call_id"] == "orphan-tool-id"
 
-    def test_confirm_gated_tool_call_id_matches(self):
-        """Confirm-gated tool's confirm_request call_id matches tool_result."""
+    def test_formerly_gated_tool_call_id_matches(self):
+        """Formerly confirm-gated tool's tool_start call_id matches tool_result."""
         emitter = EventEmitter()
         collected = []
 
@@ -402,7 +401,7 @@ class TestCallIdMatching:
         hooks = create_hooks(emitter, ws_callback=ws_cb, confirm_gated={"mcp__email__email_send"})
         tool_use_id = "confirm-tool-001"
 
-        # Pre hook: emits confirm_request
+        # Pre hook: emits tool_start (confirm-gating moved to can_use_tool)
         asyncio.run(
             hooks["pre_tool_use"](
                 {"tool_name": "mcp__email__email_send", "tool_input": {"to": "x@y.com"}},
@@ -420,12 +419,12 @@ class TestCallIdMatching:
             )
         )
 
-        confirm_reqs = [m for m in collected if m["type"] == "confirm_request"]
+        tool_starts = [m for m in collected if m["type"] == "tool_start"]
         tool_results = [m for m in collected if m["type"] == "tool_result"]
 
-        assert len(confirm_reqs) == 1
+        assert len(tool_starts) == 1
         assert len(tool_results) == 1
-        assert confirm_reqs[0]["call_id"] == tool_results[0]["call_id"]
+        assert tool_starts[0]["call_id"] == tool_results[0]["call_id"]
 
 
 class TestToolResultOutput:
