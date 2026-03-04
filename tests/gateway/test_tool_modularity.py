@@ -18,7 +18,7 @@ from corvus.capabilities.registry import (
     ToolModuleEntry,
 )
 from corvus.capabilities.modules import HUB_MANAGED_MODULES
-from corvus.permissions import expand_confirm_gated_tools
+from corvus.permissions import evaluate_tool_permission, expand_confirm_gated_tools
 
 # ---------------------------------------------------------------------------
 # Project root and config directory
@@ -444,3 +444,106 @@ class TestConfirmGatedExpansion:
                 f"Agent '{agent_name}': expected {expected} expanded entries, "
                 f"got {len(expanded)}: {expanded}"
             )
+
+
+# ---------------------------------------------------------------------------
+# Cross-agent tool isolation tests
+# ---------------------------------------------------------------------------
+
+
+class TestCrossAgentIsolation:
+    """Prove agent A cannot access tools assigned only to agent B."""
+
+    def test_finance_cannot_use_paperless(
+        self, agent_registry: AgentRegistry, cap_registry: CapabilitiesRegistry
+    ) -> None:
+        """Finance agent must be denied access to paperless tools."""
+        spec = agent_registry.get("finance")
+        assert spec is not None
+
+        decision = evaluate_tool_permission(
+            agent_name="finance",
+            spec=spec,
+            capabilities=cap_registry,
+            tool_name="mcp__paperless_finance__paperless_search",
+        )
+
+        assert not decision.allowed
+        assert decision.state == "deny"
+        assert decision.scope == "module_access"
+        assert "paperless" in decision.reason
+
+    def test_docs_cannot_use_firefly(
+        self, agent_registry: AgentRegistry, cap_registry: CapabilitiesRegistry
+    ) -> None:
+        """Docs agent must be denied access to firefly tools."""
+        spec = agent_registry.get("docs")
+        assert spec is not None
+
+        decision = evaluate_tool_permission(
+            agent_name="docs",
+            spec=spec,
+            capabilities=cap_registry,
+            tool_name="mcp__firefly_docs__firefly_list_transactions",
+        )
+
+        assert not decision.allowed
+        assert decision.state == "deny"
+        assert decision.scope == "module_access"
+        assert "firefly" in decision.reason
+
+    def test_home_cannot_use_drive(
+        self, agent_registry: AgentRegistry, cap_registry: CapabilitiesRegistry
+    ) -> None:
+        """Home agent must be denied access to drive tools."""
+        spec = agent_registry.get("home")
+        assert spec is not None
+
+        decision = evaluate_tool_permission(
+            agent_name="home",
+            spec=spec,
+            capabilities=cap_registry,
+            tool_name="mcp__drive_home__drive_list_files",
+        )
+
+        assert not decision.allowed
+        assert decision.state == "deny"
+        assert decision.scope == "module_access"
+        assert "drive" in decision.reason
+
+    def test_memory_cross_agent_blocked(
+        self, agent_registry: AgentRegistry, cap_registry: CapabilitiesRegistry
+    ) -> None:
+        """Agent A must not access Agent B's memory server."""
+        spec = agent_registry.get("finance")
+        assert spec is not None
+
+        decision = evaluate_tool_permission(
+            agent_name="finance",
+            spec=spec,
+            capabilities=cap_registry,
+            tool_name="mcp__memory_docs__memory_search",
+        )
+
+        assert not decision.allowed
+        assert decision.state == "deny"
+        assert decision.scope == "memory_access"
+        assert "Cross-agent memory access is blocked" in decision.reason
+
+    def test_agent_can_access_own_memory(
+        self, agent_registry: AgentRegistry, cap_registry: CapabilitiesRegistry
+    ) -> None:
+        """Agent must be allowed to access its own memory server."""
+        spec = agent_registry.get("finance")
+        assert spec is not None
+
+        decision = evaluate_tool_permission(
+            agent_name="finance",
+            spec=spec,
+            capabilities=cap_registry,
+            tool_name="mcp__memory_finance__memory_search",
+        )
+
+        assert decision.allowed
+        assert decision.state == "allow"
+        assert decision.scope == "memory_access"
