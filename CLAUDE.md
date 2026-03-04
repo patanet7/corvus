@@ -124,5 +124,5 @@ git push forgejo main     # Forgejo (via SSH proxy)
 
 Forgejo push requires:
 ```bash
-GIT_SSH_COMMAND="ssh -o ProxyCommand='ssh -W localhost:2222 patanet7@100.116.213.55'" git push forgejo main
+GIT_SSH_COMMAND="ssh -o ProxyCommand='ssh -W localhost:2222 <user>@<tailscale-ip>'" git push forgejo main
 ```
