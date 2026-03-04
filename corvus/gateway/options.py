@@ -21,6 +21,7 @@ from corvus.config import (
     CLAUDE_RUNTIME_HOME,
     ISOLATE_CLAUDE_HOME,
 )
+from corvus.gateway.confirm_queue import ConfirmQueue
 from corvus.gateway.runtime import GatewayRuntime
 from corvus.hooks import create_hooks
 from corvus.permissions import evaluate_tool_permission, expand_confirm_gated_tools, normalize_permission_mode
@@ -175,6 +176,7 @@ def build_options(
     ws_callback: Callable[[dict[str, Any]], Awaitable[None]] | None = None,
     allow_secret_access: bool = False,
     agent_name: str | None = None,
+    confirm_queue: ConfirmQueue | None = None,
 ) -> ClaudeAgentOptions:
     """Build ClaudeAgentOptions from hub-managed agent/runtime configuration."""
     del user  # Reserved for future per-user policy overlay.
@@ -221,6 +223,7 @@ def build_options(
         agent_name=agent_name,
         allow_secret_access=allow_secret_access,
         ws_callback=ws_callback,
+        confirm_queue=confirm_queue,
     )
 
     opts_kwargs: dict[str, Any] = {
@@ -269,6 +272,7 @@ def _build_can_use_tool(
     agent_name: str | None,
     allow_secret_access: bool,
     ws_callback: Callable[[dict[str, Any]], Awaitable[None]] | None = None,
+    confirm_queue: ConfirmQueue | None = None,
 ) -> Callable[
     [str, dict[str, Any], ToolPermissionContext],
     Awaitable[PermissionResultAllow | PermissionResultDeny],
@@ -285,7 +289,7 @@ def _build_can_use_tool(
         tool_input: dict[str, Any],
         context: ToolPermissionContext,
     ) -> PermissionResultAllow | PermissionResultDeny:
-        del tool_input, context
+        del context
         decision = evaluate_tool_permission(
             agent_name=agent_name,
             spec=spec,
@@ -314,6 +318,29 @@ def _build_can_use_tool(
                     "reason": decision.reason,
                 }
             )
+        if decision.allowed and decision.state == "confirm":
+            # Gated tool — send confirm request via WS, then block
+            call_id = tool_name  # Use tool_name as call_id for correlation
+            if ws_callback is not None:
+                await ws_callback(
+                    {
+                        "type": "confirm_request",
+                        "tool": tool_name,
+                        "params": tool_input,
+                        "call_id": call_id,
+                        "timeout_s": 60,
+                    }
+                )
+            if confirm_queue is not None:
+                approved = await confirm_queue.wait_for_confirmation(call_id)
+                if approved:
+                    return PermissionResultAllow()
+                return PermissionResultDeny(
+                    message=f"User denied tool '{tool_name}'.",
+                    interrupt=False,
+                )
+            # No confirm queue — fall through to allow (break-glass / no WS)
+            return PermissionResultAllow()
         if decision.allowed:
             return PermissionResultAllow()
         return PermissionResultDeny(message=decision.reason, interrupt=False)
@@ -423,6 +450,7 @@ def build_backend_options(
     allow_secret_access: bool = False,
     workspace_cwd: str | Path | None = None,
     session_id: str | None = None,
+    confirm_queue: ConfirmQueue | None = None,
 ) -> ClaudeAgentOptions:
     """Build backend-specific ClaudeAgentOptions for persistent SDK clients."""
     opts = build_options(
@@ -432,6 +460,7 @@ def build_backend_options(
         ws_callback=ws_callback,
         allow_secret_access=allow_secret_access,
         agent_name=agent_name,
+        confirm_queue=confirm_queue,
     )
     opts.env = {**opts.env, **backend_env}
     apply_claude_runtime_env(
