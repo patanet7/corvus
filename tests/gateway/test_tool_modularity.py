@@ -547,3 +547,49 @@ class TestCrossAgentIsolation:
         assert decision.allowed
         assert decision.state == "allow"
         assert decision.scope == "memory_access"
+
+
+# ---------------------------------------------------------------------------
+# Prompt layer isolation tests
+# ---------------------------------------------------------------------------
+
+
+class TestPromptIsolation:
+    """Each agent gets its own prompt file, not another agent's."""
+
+    def test_each_agent_has_own_prompt_file(
+        self, agent_registry: AgentRegistry
+    ) -> None:
+        """Every agent's prompt_file path must contain its own name.
+
+        This prevents misconfiguration where agent A accidentally
+        references agent B's prompt file.
+        """
+        for spec in agent_registry.list_all():
+            if spec.prompt_file:
+                assert spec.name in spec.prompt_file, (
+                    f"Agent '{spec.name}' references prompt file '{spec.prompt_file}' "
+                    "which doesn't contain its own name"
+                )
+
+    def test_each_agent_has_own_domain(
+        self, agent_registry: AgentRegistry
+    ) -> None:
+        """No two domain agents may claim the same own_domain.
+
+        Agents with own_domain='shared' (general, huginn) are excluded
+        because they intentionally share the 'shared' domain.
+        """
+        domains_seen: dict[str, str] = {}
+        for spec in agent_registry.list_all():
+            if spec.memory is None:
+                continue
+            domain = spec.memory.own_domain
+            if domain == "shared":
+                continue  # general and huginn share 'shared' by design
+            if domain in domains_seen:
+                assert False, (
+                    f"Domain '{domain}' claimed by both '{domains_seen[domain]}' "
+                    f"and '{spec.name}'"
+                )
+            domains_seen[domain] = spec.name
