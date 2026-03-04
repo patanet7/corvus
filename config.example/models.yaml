@@ -1,0 +1,47 @@
+# Per-agent model assignments and provider configuration.
+# SDK-native models: haiku, sonnet, opus (passed to AgentDefinition.model)
+# Non-Claude models: ollama/*, kimi-* (routed via provider adapters)
+
+defaults:
+  model: sonnet
+  backend: claude
+  params:
+    temperature: 0.7
+  context_limit: 200000
+
+context_limits:
+  haiku: 200000
+  sonnet: 200000
+  opus: 200000
+
+agents:
+  router:
+    model: haiku
+  general:
+    model: sonnet
+
+# Skill-specific models — reusable tasks any agent can invoke.
+skills:
+  data-transform:
+    model: haiku
+    params:
+      temperature: 0.0
+  summarize:
+    model: sonnet
+    params:
+      temperature: 0.3
+
+providers:
+  ollama:
+    api_base: ${OLLAMA_API_BASE:-http://localhost:11434}
+
+backends:
+  claude:
+    type: sdk_native
+  ollama:
+    type: env_swap
+    urls:
+      - ${OLLAMA_API_BASE:-http://localhost:11434}
+    env:
+      ANTHROPIC_AUTH_TOKEN: "ollama"
+      ANTHROPIC_API_KEY: ""

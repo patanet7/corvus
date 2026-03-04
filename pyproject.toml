@@ -1,0 +1,103 @@
+[project]
+name = "corvus-gateway"
+version = "0.1.0"
+requires-python = ">=3.11,<3.14"
+
+dependencies = [
+    # Core
+    "anthropic",
+    "claude-agent-sdk",
+    "fastapi",
+    "uvicorn[standard]",
+    "websockets",
+    "pydantic",
+    "pyyaml",
+    "apscheduler",
+    # Memory
+    "cognee",
+    "lancedb",
+    # MCP
+    "mcp>=1.0.0",
+    # Domain tools
+    "requests",
+    "google-api-python-client",
+    "google-auth-oauthlib",
+    "google-auth-httplib2>=0.2.0",
+    # Credential store + CLI
+    "argon2-cffi",
+    "zxcvbn-python",
+    "textual",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest",
+    "pytest-asyncio",
+    "pytest-xdist",
+    "httpx",
+    "ruff",
+    "mypy",
+]
+
+[tool.setuptools.packages.find]
+include = ["corvus*", "scripts*"]
+
+# ---------------------------------------------------------------------------
+# Ruff — linter + formatter
+# ---------------------------------------------------------------------------
+
+[tool.ruff]
+target-version = "py313"
+line-length = 120
+
+[tool.ruff.lint]
+select = [
+    "E",   # pycodestyle errors
+    "F",   # pyflakes
+    "W",   # pycodestyle warnings
+    "I",   # isort
+    "UP",  # pyupgrade
+    "B",   # flake8-bugbear
+]
+ignore = [
+    "E501",  # line too long — handled by formatter
+    "B008",  # do not perform function calls in argument defaults (FastAPI Depends pattern)
+]
+
+[tool.ruff.lint.isort]
+known-first-party = ["corvus", "scripts"]
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+
+# ---------------------------------------------------------------------------
+# Mypy — type checker
+# ---------------------------------------------------------------------------
+
+[tool.mypy]
+python_version = "3.13"
+ignore_missing_imports = true
+disallow_any_unimported = false
+warn_return_any = true
+warn_unused_configs = true
+check_untyped_defs = true
+disable_error_code = ["import-untyped"]
+
+# ---------------------------------------------------------------------------
+# Pytest
+# ---------------------------------------------------------------------------
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = [
+    "slow: marks tests as slow (deselect with '-m \"not slow\"')",
+    "integration: marks integration tests requiring Docker",
+]
+filterwarnings = [
+    "ignore::DeprecationWarning:zxcvbn",
+    # cognee v0.5.3 uses deprecated Starlette/Pydantic APIs — suppress until upstream fixes
+    "ignore:.*HTTP_422_UNPROCESSABLE_ENTITY.*:DeprecationWarning:cognee",
+    "ignore:.*extra keyword arguments on.*Field.*:pydantic.warnings.PydanticDeprecatedSince20:cognee",
+    "ignore:.*json_encoders.*:pydantic.warnings.PydanticDeprecatedSince20",
+]

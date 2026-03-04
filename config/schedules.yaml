@@ -1,0 +1,42 @@
+# Default schedule definitions (factory defaults).
+# Runtime overrides (enabled, cron, prompt) are stored in the SQLite schedules table.
+# New entries here auto-register on gateway startup.
+
+schedules:
+  morning_briefing:
+    description: "Daily morning briefing with agenda, pending items, and priorities"
+    type: prompt
+    agent: personal
+    cron: "0 7 * * *"
+    enabled: true
+    prompt_template: |
+      Generate my morning briefing for today. Search memory for:
+      - Pending action items and todos
+      - Recent meeting notes and follow-ups
+      - Upcoming deadlines
+      Write the briefing to my Obsidian daily note.
+
+  eod_review:
+    description: "End-of-day recap and journal prompt"
+    type: prompt
+    agent: personal
+    cron: "0 18 * * 1-5"
+    enabled: true
+    prompt_template: |
+      Generate my end-of-day review. Search memory for:
+      - What happened today (sessions, tool usage, decisions)
+      - Unresolved items to carry forward
+      Append the review to today's Obsidian daily note.
+
+  weekly_review:
+    description: "Weekly rollup and planning"
+    type: prompt
+    agent: personal
+    cron: "0 9 * * 0"
+    enabled: true
+    prompt_template: |
+      Generate my weekly review. Search memory for the past 7 days:
+      - Accomplishments and completed items
+      - Missed or deferred items
+      - Patterns and insights
+      Write to personal/planning/weekly/YYYY-MM-DD.md in Obsidian.

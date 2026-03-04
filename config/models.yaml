@@ -1,0 +1,106 @@
+# Per-agent model assignments and provider configuration.
+# SDK-native models: haiku, sonnet, opus (passed to AgentDefinition.model)
+# Non-Claude models: ollama/*, kimi-* (routed via provider adapters)
+
+defaults:
+  model: sonnet
+  backend: claude
+  params:
+    temperature: 0.7
+  context_limit: 200000
+
+# Context window sizes per model name.
+# Used for reporting context usage to frontend.
+# Agents inherit the limit of their assigned model.
+context_limits:
+  haiku: 200000
+  sonnet: 200000
+  opus: 200000
+
+agents:
+  router:
+    model: haiku
+  personal:
+    model: sonnet
+  work:
+    model: sonnet
+  finance:
+    model: opus
+    params:
+      temperature: 0.2
+  # Design doc specifies kimi-k2 for homelab, but using sonnet until
+  # the provider adapter layer (Slice 10B) adds non-Claude routing.
+  homelab:
+    model: sonnet
+  # Design doc specifies ollama/phi-3-mini for music, but using haiku
+  # until the Ollama provider adapter is wired.
+  music:
+    model: haiku
+  home:
+    model: haiku
+  email:
+    model: sonnet
+  docs:
+    model: sonnet
+  general:
+    model: sonnet
+    # backend: kimi  # Uncomment after KimiProxy is deployed (Task 3)
+
+# Skill-specific models — reusable tasks any agent can invoke.
+# When a skill is active, its model takes priority over the calling agent's model.
+skills:
+  data-transform:
+    model: haiku
+    params:
+      temperature: 0.0
+  summarize:
+    model: sonnet
+    params:
+      temperature: 0.3
+  code-review:
+    model: opus
+    params:
+      temperature: 0.2
+  triage:
+    model: haiku
+    params:
+      temperature: 0.3
+
+providers:
+  ollama:
+    api_base: ${OLLAMA_API_BASE:-http://localhost:11434}
+    fallback_url: http://localhost:11434
+  openkimi:
+    api_base: https://api.moonshot.cn/v1
+
+# Backend definitions — how each model backend is reached.
+# Types:
+#   sdk_native  — Direct Claude API via claude-agent-sdk (no extra config)
+#   proxy       — HTTP proxy (KimiProxy) that translates requests
+#   env_swap    — Override env vars to point SDK at a different API (e.g. Ollama)
+backends:
+  claude:
+    type: sdk_native
+    # Active when ANTHROPIC_API_KEY is set
+  openai:
+    type: openai
+    # Active when OPENAI_API_KEY is set
+  kimi:
+    type: proxy
+    base_url: "http://localhost:8100"
+    env:
+      ANTHROPIC_API_KEY: "not-needed"
+  ollama:
+    type: env_swap
+    # Probe urls in order; first reachable wins (cached at startup).
+    # Fallback to localhost if the LAN host is unreachable.
+    urls:
+      - "${OLLAMA_API_BASE:-http://localhost:11434}"
+      - "http://localhost:11434"
+    env:
+      ANTHROPIC_AUTH_TOKEN: "ollama"
+      ANTHROPIC_API_KEY: ""
+  openai_compat:
+    type: openai
+    # base_url from OPENAI_COMPAT_BASE_URL env var
+    # api_key from OPENAI_COMPAT_API_KEY env var (optional)

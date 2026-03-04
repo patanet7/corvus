@@ -1,0 +1,10 @@
+decay_half_life_days: 30.0
+evergreen_threshold: 0.9
+mmr_lambda: 0.7
+audit_enabled: true
+overlays:
+  - name: cognee
+    enabled: false
+    weight: 0.35
+    settings:
+      data_dir: /data/cognee

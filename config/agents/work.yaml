@@ -1,0 +1,36 @@
+name: work
+description: >
+  Work projects, meeting notes, transcript processing, professional
+  task management, career development, and workplace communication
+enabled: true
+models:
+  preferred: null
+  fallback: null
+  auto: true
+  complexity: medium
+prompt_file: corvus/prompts/work.md
+soul_file: corvus/prompts/souls/work.md
+tools:
+  builtin:
+    - Bash
+    - Read
+  modules:
+    obsidian:
+      allowed_prefixes:
+        - "work/"
+        - "shared/"
+        - "personal/planning/"
+      read: true
+      write: false
+    email:
+      enabled: true
+      read_only: true
+    drive:
+      enabled: true
+      read_only: true
+  confirm_gated: []
+memory:
+  own_domain: work
+  readable_domains: null
+  can_read_shared: true
+  can_write: true

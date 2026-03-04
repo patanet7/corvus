@@ -1,0 +1,27 @@
+name: email
+description: >
+  Gmail and Yahoo inbox triage, email search, labeling, archiving,
+  cleanup, composing replies, and inbox zero maintenance
+enabled: true
+models:
+  preferred: null
+  fallback: null
+  auto: true
+  complexity: medium
+prompt_file: corvus/prompts/email.md
+soul_file: corvus/prompts/souls/email.md
+tools:
+  builtin:
+    - Bash
+    - Read
+  modules:
+    email:
+      enabled: true
+  confirm_gated:
+    - email.send
+    - email.archive
+memory:
+  own_domain: email
+  readable_domains: null
+  can_read_shared: true
+  can_write: true

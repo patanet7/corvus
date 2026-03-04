@@ -1,0 +1,25 @@
+services:
+  corvus-gateway:
+    build: .
+    container_name: corvus-gateway
+    ports:
+      - "18789:18789"
+    volumes:
+      - ./config.example:/config:ro
+      - corvus-data:/data
+    environment:
+      - CORVUS_CONFIG_DIR=/config
+      - DATA_DIR=/data
+      - ALLOWED_USERS=${ALLOWED_USERS:-}
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
+    restart: unless-stopped
+
+  corvus-ui:
+    build: frontend/
+    container_name: corvus-ui
+    ports:
+      - "18790:80"
+    restart: unless-stopped
+
+volumes:
+  corvus-data:

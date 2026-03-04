@@ -1,0 +1,78 @@
+[tools]
+python = "3.13"
+
+[tasks.serve]
+description = "Start Corvus gateway server"
+run = "uv run python -m corvus.server"
+
+[tasks.setup]
+description = "Interactive setup wizard"
+run = "uv run python -m corvus.cli.setup"
+
+[tasks."setup:status"]
+description = "Show credential status dashboard"
+run = "uv run python -m corvus.cli.setup status"
+
+[tasks."setup:add"]
+description = "Add or update a credential"
+run = "uv run python -m corvus.cli.setup add"
+
+[tasks."setup:rotate"]
+description = "Rotate a credential with rollback"
+run = "uv run python -m corvus.cli.setup rotate"
+
+[tasks."setup:passphrase"]
+description = "Set or change break-glass passphrase"
+run = "uv run python -m corvus.cli.setup passphrase"
+
+[tasks.test]
+description = "Run all tests"
+run = "uv run pytest tests/ -v"
+
+[tasks."test:contracts"]
+description = "Run contract tests only"
+run = "uv run pytest tests/contracts/ -v"
+
+[tasks."test:gateway"]
+description = "Run gateway tests only"
+run = "uv run pytest tests/gateway/ -v"
+
+[tasks."test:gateway:log"]
+description = "Run gateway tests and write log to tests/output/"
+run = "mkdir -p tests/output && ts=$(date +%Y%m%d-%H%M%S) && uv run pytest tests/gateway/ -v 2>&1 | tee tests/output/test-gateway-$ts.log"
+
+[tasks.lint]
+description = "Run linting"
+run = "uv run ruff check corvus/ tests/"
+
+[tasks.format]
+description = "Format code"
+run = "uv run ruff format corvus/ tests/"
+
+[tasks."break-glass"]
+description = "Start server with break-glass mode"
+run = "uv run python -m corvus.server --break-glass"
+
+[tasks."dev:frontend"]
+description = "Start frontend dev server"
+run = "cd frontend && pnpm install && pnpm dev"
+
+[tasks."dev:backend"]
+description = "Start backend server (alias for serve)"
+run = "uv run python -m corvus.server"
+
+[tasks."test:frontend:check:log"]
+description = "Run frontend type checks and write log to tests/output/"
+run = "mkdir -p tests/output && ts=$(date +%Y%m%d-%H%M%S) && cd frontend && pnpm check 2>&1 | tee ../tests/output/test-frontend-check-$ts.log"
+
+[tasks."test:frontend:unit:log"]
+description = "Run frontend unit tests and write log to tests/output/"
+run = "mkdir -p tests/output && ts=$(date +%Y%m%d-%H%M%S) && cd frontend && pnpm test 2>&1 | tee ../tests/output/test-frontend-unit-$ts.log"
+
+[tasks."test:frontend:e2e:log"]
+description = "Run frontend e2e tests and write log to tests/output/"
+run = "mkdir -p tests/output && ts=$(date +%Y%m%d-%H%M%S) && cd frontend && pnpm test:e2e 2>&1 | tee ../tests/output/test-frontend-e2e-$ts.log"
+
+[tasks."test:frontend:e2e:live:log"]
+description = "Run live frontend e2e tests (backend-enabled) and write log to tests/output/"
+run = "mkdir -p tests/output && ts=$(date +%Y%m%d-%H%M%S) && cd frontend && pnpm test:e2e:live 2>&1 | tee ../tests/output/test-frontend-e2e-live-$ts.log"

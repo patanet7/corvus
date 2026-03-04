@@ -1,0 +1,24 @@
+name: home
+description: >
+  Home Assistant smart home control -- lights, thermostat, sensors,
+  door locks, scenes, and automations via entity state management
+enabled: true
+models:
+  preferred: null
+  fallback: null
+  auto: true
+  complexity: low
+prompt_file: corvus/prompts/home.md
+soul_file: corvus/prompts/souls/home.md
+tools:
+  builtin: []
+  modules:
+    ha:
+      enabled: true
+  confirm_gated:
+    - ha.call_service
+memory:
+  own_domain: home
+  readable_domains: null
+  can_read_shared: true
+  can_write: true

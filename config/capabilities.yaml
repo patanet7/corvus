@@ -1,0 +1,14 @@
+version: 1
+modules:
+  obsidian:
+    enabled: true
+  email:
+    enabled: true
+  drive:
+    enabled: true
+  ha:
+    enabled: true
+  paperless:
+    enabled: true
+  firefly:
+    enabled: true

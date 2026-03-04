@@ -1,0 +1,23 @@
+name: music
+description: >
+  Music practice planning, piano repertoire tracking, practice session
+  logging, technique coaching, and performance preparation
+enabled: true
+models:
+  preferred: null
+  fallback: null
+  auto: true
+  complexity: low
+prompt_file: corvus/prompts/music.md
+soul_file: corvus/prompts/souls/music.md
+tools:
+  builtin:
+    - Bash
+    - Read
+  modules: {}
+  confirm_gated: []
+memory:
+  own_domain: music
+  readable_domains: null
+  can_read_shared: true
+  can_write: true

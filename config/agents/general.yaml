@@ -1,0 +1,29 @@
+name: general
+description: >
+  Cross-domain planning, daily overview, weekly review, multi-topic
+  questions, general conversation, thinking through decisions,
+  summarizing across domains, questions about past conversations,
+  and anything that spans more than one specific domain
+enabled: true
+models:
+  preferred: null
+  fallback: null
+  auto: true
+  complexity: medium
+prompt_file: corvus/prompts/general.md
+soul_file: corvus/prompts/souls/general.md
+tools:
+  builtin:
+    - Bash
+    - Read
+  modules:
+    obsidian:
+      allowed_prefixes: null
+      read: true
+      write: false
+  confirm_gated: []
+memory:
+  own_domain: shared
+  readable_domains: null
+  can_read_shared: true
+  can_write: true

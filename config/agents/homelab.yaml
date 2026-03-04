@@ -1,0 +1,33 @@
+name: homelab
+description: >
+  Server management, Docker containers, Komodo fleet operations,
+  Loki log queries, Tailscale network, NFS storage, system monitoring,
+  and infrastructure troubleshooting
+enabled: true
+models:
+  preferred: null
+  fallback: null
+  auto: true
+  complexity: high
+prompt_file: corvus/prompts/homelab.md
+soul_file: corvus/prompts/souls/homelab.md
+tools:
+  builtin:
+    - Bash
+    - Read
+    - Grep
+    - Glob
+  modules:
+    obsidian:
+      allowed_prefixes:
+        - "homelab/"
+      read: true
+      write: true
+  confirm_gated:
+    - obsidian.write
+    - obsidian.append
+memory:
+  own_domain: homelab
+  readable_domains: null
+  can_read_shared: true
+  can_write: true

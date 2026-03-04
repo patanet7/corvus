@@ -1,0 +1,33 @@
+name: docs
+description: >
+  Paperless-ngx document search, OCR content retrieval, document
+  tagging, correspondent management, and scanned document organization.
+  Also Google Drive/Docs file management.
+enabled: true
+models:
+  preferred: null
+  fallback: null
+  auto: true
+  complexity: medium
+prompt_file: corvus/prompts/docs.md
+soul_file: corvus/prompts/souls/docs.md
+tools:
+  builtin:
+    - Bash
+  modules:
+    paperless:
+      enabled: true
+    drive:
+      enabled: true
+  confirm_gated:
+    - paperless.tag
+    - paperless.bulk_edit
+    - drive.delete
+    - drive.permanent_delete
+    - drive.share
+    - drive.cleanup
+memory:
+  own_domain: docs
+  readable_domains: null
+  can_read_shared: true
+  can_write: true

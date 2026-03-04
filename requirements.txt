@@ -1,0 +1,34 @@
+# Core
+anthropic
+claude-agent-sdk
+fastapi
+uvicorn[standard]
+websockets
+pydantic
+pyyaml
+apscheduler
+
+# Memory — BM25 (FTS5 built into SQLite) + Cognee (knowledge graph + vectors)
+cognee
+lancedb
+
+# MCP servers (optional — standalone stdio servers)
+mcp>=1.0.0
+
+# Domain scripts
+requests
+google-api-python-client
+google-auth-oauthlib
+google-auth-httplib2>=0.2.0
+
+# Credential store + CLI
+argon2-cffi
+zxcvbn-python
+textual
+
+# Dev
+pytest
+pytest-asyncio
+pytest-xdist
+ruff
+mypy

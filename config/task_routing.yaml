@@ -1,0 +1,78 @@
+defaults:
+  enable_decomposition: true
+  expand_from_router: true
+  max_subtasks: 6
+
+task_types:
+  coding:
+    keywords:
+      - refactor
+      - implement
+      - bug
+      - fix
+      - api
+      - backend
+      - test
+      - code
+    decomposition:
+      enabled: true
+      subtasks:
+        - id: triage
+          agent: work
+          skill: triage
+          instruction: "Triage requirements, identify risks, and define an execution checklist."
+        - id: implementation
+          agent: work
+          skill: data-transform
+          instruction: "Implement code changes and validate behavior with tests."
+        - id: review
+          agent: docs
+          skill: code-review
+          instruction: "Summarize behavior impact, risks, and release notes."
+
+  research:
+    keywords:
+      - compare
+      - research
+      - evaluate
+      - options
+      - benchmark
+    decomposition:
+      enabled: true
+      subtasks:
+        - id: gather
+          agent: work
+          skill: summarize
+          instruction: "Collect and structure the key facts and options."
+        - id: analyze
+          agent: finance
+          skill: triage
+          instruction: "Analyze tradeoffs, costs, and risks."
+        - id: summary
+          agent: docs
+          skill: summarize
+          instruction: "Produce a concise decision-ready recommendation."
+
+  operations:
+    keywords:
+      - deploy
+      - monitor
+      - incident
+      - uptime
+      - homelab
+      - infrastructure
+    decomposition:
+      enabled: true
+      subtasks:
+        - id: diagnose
+          agent: homelab
+          skill: triage
+          instruction: "Diagnose system status and identify failure points."
+        - id: remediate
+          agent: home
+          skill: data-transform
+          instruction: "Propose and execute safe remediation steps."
+        - id: report
+          agent: docs
+          skill: summarize
+          instruction: "Summarize incident state and follow-up actions."

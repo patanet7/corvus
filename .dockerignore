@@ -1,0 +1,13 @@
+.venv/
+.git/
+.data/
+tests/
+docs/
+infra/
+frontend/node_modules/
+frontend/.svelte-kit/
+frontend/storybook-static/
+*.pyc
+__pycache__/
+.env
+.env.*

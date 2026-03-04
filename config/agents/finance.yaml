@@ -1,0 +1,25 @@
+name: finance
+description: >
+  Firefly III transactions, YNAB budgets, spending analysis, account
+  balances, invoice tracking, and financial reports
+enabled: true
+models:
+  preferred: null
+  fallback: null
+  auto: true
+  complexity: medium
+prompt_file: corvus/prompts/finance.md
+soul_file: corvus/prompts/souls/finance.md
+tools:
+  builtin:
+    - Bash
+  modules:
+    firefly:
+      enabled: true
+  confirm_gated:
+    - firefly.create_transaction
+memory:
+  own_domain: finance
+  readable_domains: null
+  can_read_shared: true
+  can_write: true

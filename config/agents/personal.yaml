@@ -1,0 +1,32 @@
+name: personal
+description: >
+  Daily planning, task management, journaling, ADHD support,
+  stray thought capture, health tracking, personal reminders,
+  and self-care routines
+enabled: true
+models:
+  preferred: null
+  fallback: null
+  auto: true
+  complexity: medium
+prompt_file: corvus/prompts/personal.md
+soul_file: corvus/prompts/souls/personal.md
+tools:
+  builtin:
+    - Bash
+    - Read
+  modules:
+    obsidian:
+      allowed_prefixes:
+        - "personal/"
+        - "shared/"
+      read: true
+      write: true
+  confirm_gated:
+    - obsidian.write
+    - obsidian.append
+memory:
+  own_domain: personal
+  readable_domains: null
+  can_read_shared: true
+  can_write: true
