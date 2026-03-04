@@ -1,0 +1,32 @@
+============================= test session starts ==============================
+platform darwin -- Python 3.13.7, pytest-9.0.2, pluggy-1.6.0 -- /Users/thomaspatane/Documents/GitHub/corvus/.venv/bin/python3
+cachedir: .pytest_cache
+rootdir: /Users/thomaspatane/Documents/GitHub/corvus
+configfile: pyproject.toml
+plugins: anyio-4.12.1, timeout-2.4.0, typeguard-4.5.1, asyncio-1.3.0
+asyncio: mode=Mode.STRICT, debug=False, asyncio_default_fixture_loop_scope=None, asyncio_default_test_loop_scope=function
+collecting ... collected 21 items
+
+tests/gateway/test_hooks.py::test_blocks_cat_env PASSED                  [  4%]
+tests/gateway/test_hooks.py::test_blocks_source_env PASSED               [  9%]
+tests/gateway/test_hooks.py::test_blocks_head_env PASSED                 [ 14%]
+tests/gateway/test_hooks.py::test_blocks_printenv PASSED                 [ 19%]
+tests/gateway/test_hooks.py::test_blocks_env_command PASSED              [ 23%]
+tests/gateway/test_hooks.py::test_allows_python_scripts PASSED           [ 28%]
+tests/gateway/test_hooks.py::test_allows_ssh_commands PASSED             [ 33%]
+tests/gateway/test_hooks.py::test_allows_docker_commands PASSED          [ 38%]
+tests/gateway/test_hooks.py::test_blocks_read_env PASSED                 [ 42%]
+tests/gateway/test_hooks.py::test_allows_read_normal PASSED              [ 47%]
+tests/gateway/test_hooks.py::TestPreToolUseConfirmGating::test_formerly_gated_tool_passes_through PASSED [ 52%]
+tests/gateway/test_hooks.py::TestPreToolUseConfirmGating::test_ha_call_service_passes_through PASSED [ 57%]
+tests/gateway/test_hooks.py::TestPreToolUseConfirmGating::test_firefly_passes_through PASSED [ 61%]
+tests/gateway/test_hooks.py::TestPreToolUseConfirmGating::test_non_gated_tool_passes_through PASSED [ 66%]
+tests/gateway/test_hooks.py::TestPreToolUseConfirmGating::test_empty_gated_set_passes_all PASSED [ 71%]
+tests/gateway/test_hooks.py::TestPreToolUseConfirmGating::test_bash_env_still_blocked PASSED [ 76%]
+tests/gateway/test_hooks.py::TestPreToolUseConfirmGating::test_read_env_still_blocked PASSED [ 80%]
+tests/gateway/test_hooks.py::TestPreToolUseConfirmGating::test_break_glass_override_allows_secret_commands PASSED [ 85%]
+tests/gateway/test_hooks.py::TestEventEmittingHooks::test_post_tool_use_emits_tool_call_event PASSED [ 90%]
+tests/gateway/test_hooks.py::TestEventEmittingHooks::test_pre_tool_use_does_not_emit_confirm_gate_event PASSED [ 95%]
+tests/gateway/test_hooks.py::TestEventEmittingHooks::test_pre_tool_use_emits_block_event PASSED [100%]
+
+============================== 21 passed in 0.04s ==============================

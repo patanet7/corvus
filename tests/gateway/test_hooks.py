@@ -67,17 +67,20 @@ class TestPreToolUseConfirmGating:
         input_data = {"tool_name": tool_name, "tool_input": tool_input or {}}
         return asyncio.run(hooks["pre_tool_use"](input_data, "test-id", None))
 
-    def test_gated_tool_triggers_confirm(self):
+    def test_formerly_gated_tool_passes_through(self):
+        """Confirm-gating moved to can_use_tool callback; hooks pass through."""
         result = self._run_hook("mcp__email__email_send")
-        assert result["decision"] == "confirm"
+        assert result == {}
 
-    def test_ha_call_service_triggers_confirm(self):
+    def test_ha_call_service_passes_through(self):
+        """Confirm-gating moved to can_use_tool callback; hooks pass through."""
         result = self._run_hook("mcp__ha__ha_call_service")
-        assert result["decision"] == "confirm"
+        assert result == {}
 
-    def test_firefly_triggers_confirm(self):
+    def test_firefly_passes_through(self):
+        """Confirm-gating moved to can_use_tool callback; hooks pass through."""
         result = self._run_hook("mcp__firefly__firefly_create_transaction")
-        assert result["decision"] == "confirm"
+        assert result == {}
 
     def test_non_gated_tool_passes_through(self):
         result = self._run_hook("mcp__email__email_list")
@@ -133,7 +136,8 @@ class TestEventEmittingHooks:
         assert event["event_type"] == "tool_call"
         assert event["metadata"]["tool"] == "Bash"
 
-    def test_pre_tool_use_emits_confirm_gate_event(self, tmp_path: Path):
+    def test_pre_tool_use_does_not_emit_confirm_gate_event(self, tmp_path: Path):
+        """Confirm-gating moved to can_use_tool; hooks must NOT emit confirm_gate."""
         log = tmp_path / "events.jsonl"
         emitter = EventEmitter()
         emitter.register_sink(JSONLFileSink(log))
@@ -146,10 +150,11 @@ class TestEventEmittingHooks:
                 None,
             )
         )
-        assert result["decision"] == "confirm"
-        event = json.loads(log.read_text().strip())
-        assert event["event_type"] == "confirm_gate"
-        assert event["metadata"]["tool"] == "mcp__email__email_send"
+        assert result == {}
+        # No confirm_gate event should be written
+        if log.exists():
+            content = log.read_text().strip()
+            assert content == "" or "confirm_gate" not in content
 
     def test_pre_tool_use_emits_block_event(self, tmp_path: Path):
         log = tmp_path / "events.jsonl"

@@ -62,11 +62,13 @@ def create_hooks(
     Args:
         emitter: EventEmitter for structured event logging.
         ws_callback: Optional async callable(msg_dict) for WebSocket forwarding.
-            When provided, tool_start, tool_result, and confirm_request messages
-            are forwarded to the connected WebSocket client.
-        confirm_gated: Override set of confirm-gated tool names. When provided,
-            replaces the default CONFIRM_GATED_TOOLS. Used by AgentsHub to derive
-            gated tools from CapabilitiesRegistry instead of hardcoded config.
+            When provided, tool_start and tool_result messages are forwarded to
+            the connected WebSocket client.
+        confirm_gated: Deprecated/unused in hooks. Confirm-gating is now handled
+            by the can_use_tool callback in options.py via ConfirmQueue. Kept for
+            backward compatibility of the function signature.
+        allow_secret_access: When True, bypass .env / secrets security blocks
+            (break-glass mode).
 
     Returns dict with 'pre_tool_use' and 'post_tool_use' async callables.
     """
@@ -104,20 +106,7 @@ def create_hooks(
             "start_time": time.monotonic(),
         }
 
-        # Confirm-gating
-        if tool_name in gated_tools:
-            if ws_callback:
-                await ws_callback(
-                    {
-                        "type": "confirm_request",
-                        "tool": tool_name,
-                        "params": tool_input,
-                        "call_id": call_id,
-                        "timeout_s": 60,
-                    }
-                )
-            await emitter.emit("confirm_gate", tool=tool_name, tool_use_id=tool_use_id)
-            return {"decision": "confirm", "reason": f"Tool {tool_name} requires user confirmation."}
+        # Confirm-gating is handled by can_use_tool callback (options.py).
 
         # Emit tool_start for frontend (non-blocked, non-gated tools)
         if ws_callback:
