@@ -18,6 +18,7 @@ from corvus.capabilities.registry import (
     ToolModuleEntry,
 )
 from corvus.capabilities.modules import HUB_MANAGED_MODULES
+from corvus.permissions import expand_confirm_gated_tools
 
 # ---------------------------------------------------------------------------
 # Project root and config directory
@@ -329,3 +330,117 @@ class TestYAMLSpecToResolvedTools:
             )
             # Plain 'obsidian' should NOT be a key (per-agent naming replaces it)
             assert "obsidian" not in resolved.mcp_servers
+
+
+# ---------------------------------------------------------------------------
+# Confirm-gated expansion tests
+# ---------------------------------------------------------------------------
+
+
+class TestConfirmGatedExpansion:
+    """Verify confirm_gated short names expand to full MCP tool names."""
+
+    def test_finance_gated_tools(self, agent_registry: AgentRegistry) -> None:
+        """Finance declares confirm_gated: [firefly.create_transaction].
+
+        Expansion must include the short name plus both MCP forms
+        (with and without agent suffix).
+        """
+        spec = agent_registry.get("finance")
+        assert spec is not None, "finance agent not found in config/agents/"
+
+        expanded = expand_confirm_gated_tools("finance", spec.tools.confirm_gated)
+
+        # Short name preserved
+        assert "firefly.create_transaction" in expanded
+        # MCP form with agent suffix: mcp__{module}_{agent}__{module}_{action}
+        assert "mcp__firefly_finance__firefly_create_transaction" in expanded
+        # MCP form without agent suffix: mcp__{module}__{module}_{action}
+        assert "mcp__firefly__firefly_create_transaction" in expanded
+
+    def test_docs_gated_tools(self, agent_registry: AgentRegistry) -> None:
+        """Docs declares confirm_gated for paperless and drive tools.
+
+        All short names and their MCP expansions must be present.
+        """
+        spec = agent_registry.get("docs")
+        assert spec is not None, "docs agent not found in config/agents/"
+
+        expanded = expand_confirm_gated_tools("docs", spec.tools.confirm_gated)
+
+        # Short names preserved
+        assert "paperless.tag" in expanded
+        assert "paperless.bulk_edit" in expanded
+        assert "drive.delete" in expanded
+        assert "drive.permanent_delete" in expanded
+        assert "drive.share" in expanded
+        assert "drive.cleanup" in expanded
+
+        # MCP forms with agent suffix
+        assert "mcp__paperless_docs__paperless_tag" in expanded
+        assert "mcp__paperless_docs__paperless_bulk_edit" in expanded
+        assert "mcp__drive_docs__drive_delete" in expanded
+        assert "mcp__drive_docs__drive_permanent_delete" in expanded
+        assert "mcp__drive_docs__drive_share" in expanded
+        assert "mcp__drive_docs__drive_cleanup" in expanded
+
+        # MCP forms without agent suffix
+        assert "mcp__paperless__paperless_tag" in expanded
+        assert "mcp__drive__drive_delete" in expanded
+
+    def test_home_gated_tools(self, agent_registry: AgentRegistry) -> None:
+        """Home declares confirm_gated: [ha.call_service].
+
+        Expansion must include both MCP forms.
+        """
+        spec = agent_registry.get("home")
+        assert spec is not None, "home agent not found in config/agents/"
+
+        expanded = expand_confirm_gated_tools("home", spec.tools.confirm_gated)
+
+        assert "ha.call_service" in expanded
+        assert "mcp__ha_home__ha_call_service" in expanded
+        assert "mcp__ha__ha_call_service" in expanded
+
+    def test_general_has_no_gated_tools(self, agent_registry: AgentRegistry) -> None:
+        """General declares confirm_gated: []. Expansion must be empty."""
+        spec = agent_registry.get("general")
+        assert spec is not None, "general agent not found in config/agents/"
+
+        expanded = expand_confirm_gated_tools("general", spec.tools.confirm_gated)
+
+        assert len(expanded) == 0, f"Expected empty set, got {expanded}"
+
+    def test_expansion_returns_set(self, agent_registry: AgentRegistry) -> None:
+        """expand_confirm_gated_tools must return a set."""
+        spec = agent_registry.get("finance")
+        assert spec is not None
+
+        expanded = expand_confirm_gated_tools("finance", spec.tools.confirm_gated)
+        assert isinstance(expanded, set), f"Expected set, got {type(expanded)}"
+
+    def test_expansion_count_matches_expected(
+        self, agent_registry: AgentRegistry
+    ) -> None:
+        """Each dotted short name produces 3 entries (short + 2 MCP forms).
+
+        finance has 1 confirm_gated entry -> 3 expanded.
+        home has 1 -> 3.
+        docs has 6 -> 18.
+        general has 0 -> 0.
+        """
+        expected_counts = {
+            "finance": 3,   # 1 short name * 3
+            "home": 3,      # 1 short name * 3
+            "docs": 18,     # 6 short names * 3
+            "general": 0,
+        }
+
+        for agent_name, expected in expected_counts.items():
+            spec = agent_registry.get(agent_name)
+            assert spec is not None
+            expanded = expand_confirm_gated_tools(agent_name, spec.tools.confirm_gated)
+            assert len(expanded) == expected, (
+                f"Agent '{agent_name}': expected {expected} expanded entries, "
+                f"got {len(expanded)}: {expanded}"
+            )
