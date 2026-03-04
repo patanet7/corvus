@@ -10,6 +10,8 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+
+from corvus.gateway.confirm_queue import ConfirmQueue
 import uuid
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -182,6 +184,7 @@ class ChatSession:
             session_id=session_id,
             messages=[],
         )
+        self.confirm_queue = ConfirmQueue()
 
     # ------------------------------------------------------------------
     # Send sub-methods (decomposed from the monolithic _send closure)
@@ -751,6 +754,7 @@ class ChatSession:
                 ),
                 workspace_cwd=workspace_cwd,
                 session_id=self.session_id,
+                confirm_queue=self.confirm_queue,
             )
 
             async with ClaudeSDKClient(options=client_options) as client:
@@ -1071,6 +1075,7 @@ class ChatSession:
                     dispatch_id=turn.dispatch_id,
                     turn_id=turn.turn_id,
                 )
+                self.confirm_queue.respond(call_id, approved=bool(approved))
                 continue
             if control_msg.get("message"):
                 await self.send(
@@ -1311,6 +1316,7 @@ class ChatSession:
                     logger.exception("Dispatch control listener failed")
             self.runtime.dispatch_controls.unregister(dispatch_id)
             self._current_turn = None
+            self.confirm_queue.cancel_all()
             self.current_turn_id = None
 
     # ------------------------------------------------------------------
@@ -1386,7 +1392,7 @@ class ChatSession:
                     },
                     persist=True,
                 )
-                # TODO: Wire to SDK confirm gate when supported
+                self.confirm_queue.respond(call_id, approved=bool(approved))
                 continue
 
             user_message = msg.get("message", "")
