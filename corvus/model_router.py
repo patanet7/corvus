@@ -348,6 +348,69 @@ class ModelRouter:
                 return model
         return None
 
+    def get_agent_model_assignments(self) -> list[dict[str, Any]]:
+        """Return per-agent model assignments with availability status.
+
+        Used by /api/models endpoint to show role-aware model info.
+        """
+        assignments: list[dict[str, Any]] = []
+        discovered = {
+            m.id: m
+            for m in (self._discovered_models if hasattr(self, "_discovered_models") else [])
+        }
+
+        for agent_name, agent_cfg in self._agents.items():
+            model = str(agent_cfg.get("model", self.default_model))
+            model_info = discovered.get(model)
+            assignments.append({
+                "agent": agent_name,
+                "model": model,
+                "backend": str(agent_cfg.get("backend", self.default_backend)),
+                "available": model_info.available if model_info else False,
+                "params": {**self.default_params, **agent_cfg.get("params", {})},
+            })
+
+        return assignments
+
+    def validate_agent_assignments(self) -> list[str]:
+        """Check that all agent-assigned models are available. Return warnings."""
+        warnings: list[str] = []
+        discovered_ids = {
+            m.id for m in (self._discovered_models if hasattr(self, "_discovered_models") else [])
+        }
+
+        for agent_name, agent_cfg in self._agents.items():
+            model = str(agent_cfg.get("model", self.default_model))
+            if discovered_ids and model not in discovered_ids:
+                warnings.append(
+                    f"Agent '{agent_name}' assigned model '{model}' which is not available"
+                )
+        return warnings
+
+    def resolve_best_available(self, preferred: str) -> str:
+        """Return preferred model if available, else best fallback by capability tier.
+
+        Tier order: opus > sonnet > haiku > first available.
+        """
+        if not hasattr(self, "_discovered_models"):
+            return preferred
+
+        available_ids = {m.id for m in self._discovered_models if m.available}
+        if preferred in available_ids:
+            return preferred
+
+        # Capability tier fallback
+        tier_order = ["opus", "sonnet", "haiku"]
+        for tier_model in tier_order:
+            if tier_model in available_ids:
+                return tier_model
+
+        # Last resort: any available model
+        if available_ids:
+            return next(iter(available_ids))
+
+        return preferred
+
     @staticmethod
     def _litellm_model_map() -> dict[str, str]:
         """Short name -> LiteLLM model ID for SDK-native models."""

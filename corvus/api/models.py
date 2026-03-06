@@ -28,12 +28,13 @@ def _require_model_router() -> ModelRouter:
 
 @router.get("")
 async def list_models(user: str = Depends(get_user)):
-    """List all available models for frontend model selection."""
+    """List all available models with per-agent role assignments."""
     del user
     model_router = _require_model_router()
     return {
         "models": [m.to_dict() for m in model_router.list_available_models()],
         "default_model": model_router.default_model,
+        "agent_assignments": model_router.get_agent_model_assignments(),
     }
 
 
