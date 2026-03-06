@@ -200,6 +200,19 @@ async def reload_agents(user: str = Depends(get_user)):
     return _require_service().reload_agents()
 
 
+@router.get("/agents/{agent_name}/history")
+async def get_agent_history(
+    agent_name: str,
+    limit: int = 50,
+    offset: int = 0,
+    user: str = Depends(get_user),
+):
+    """Get run history for a specific agent."""
+    session_mgr = _require_session_mgr()
+    runs = session_mgr.list_runs(agent=agent_name, limit=limit, offset=offset)
+    return {"agent": agent_name, "runs": runs, "total": len(runs)}
+
+
 @router.get("/agents/{name}/sessions")
 async def list_agent_sessions(
     name: str,
