@@ -111,3 +111,41 @@ class TestConfigTranslation:
         model_names = {m["model_name"] for m in result["model_list"]}
         for expected in ("haiku", "sonnet", "opus"):
             assert expected in model_names, f"Missing SDK-native model: {expected}"
+
+
+class TestLiteLLMManagerLifecycle:
+    """Verify LiteLLMManager properties and config generation to disk."""
+
+    def test_base_url_default(self) -> None:
+        from corvus.litellm_manager import LiteLLMManager
+
+        mgr = LiteLLMManager()
+        assert mgr.base_url == "http://127.0.0.1:4000"
+
+    def test_base_url_custom_port(self) -> None:
+        from corvus.litellm_manager import LiteLLMManager
+
+        mgr = LiteLLMManager(port=5555)
+        assert mgr.base_url == "http://127.0.0.1:5555"
+
+    def test_is_running_false_before_start(self) -> None:
+        from corvus.litellm_manager import LiteLLMManager
+
+        mgr = LiteLLMManager()
+        assert mgr.is_running is False
+
+    def test_config_written_to_disk(self, tmp_path: Path) -> None:
+        from corvus.litellm_manager import generate_litellm_config
+
+        models_yaml = tmp_path / "models.yaml"
+        models_yaml.write_text(yaml.dump({
+            "defaults": {"model": "sonnet", "backend": "claude"},
+            "backends": {"claude": {"type": "sdk_native"}},
+        }))
+
+        config = generate_litellm_config(models_yaml)
+        out = tmp_path / "litellm_config.yaml"
+        out.write_text(yaml.dump(config, default_flow_style=False))
+        assert out.exists()
+        reloaded = yaml.safe_load(out.read_text())
+        assert "model_list" in reloaded
