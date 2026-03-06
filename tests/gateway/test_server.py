@@ -33,6 +33,8 @@ class TestServerSourceContracts:
         self.server_source = (root / "server.py").read_text()
         self.chat_source = (root / "api" / "chat.py").read_text()
         self.chat_session_source = (root / "gateway" / "chat_session.py").read_text()
+        self.run_executor_source = (root / "gateway" / "run_executor.py").read_text()
+        self.dispatch_orchestrator_source = (root / "gateway" / "dispatch_orchestrator.py").read_text()
         self.webhooks_source = (root / "api" / "webhooks.py").read_text()
         self.options_source = (root / "gateway" / "options.py").read_text()
 
@@ -103,12 +105,12 @@ class TestServerSourceContracts:
 
     def test_user_messages_collected_in_transcript(self):
         """User messages are appended to transcript.messages."""
-        assert 'transcript.messages.append({"role": "user"' in self.chat_session_source
+        assert 'transcript.messages.append({"role": "user"' in self.dispatch_orchestrator_source
 
     def test_assistant_responses_collected_in_transcript(self):
         """Assistant responses are appended to transcript.messages."""
-        assert "transcript.messages.append(" in self.chat_session_source
-        assert '"role": "assistant"' in self.chat_session_source
+        assert "transcript.messages.append(" in self.run_executor_source
+        assert '"role": "assistant"' in self.run_executor_source
 
     def test_stop_hook_calls_extract_on_disconnect(self):
         """extract_session_memories is called in the WebSocketDisconnect handler."""
@@ -129,8 +131,8 @@ class TestServerSourceContracts:
 
     def test_response_parts_collected(self):
         """response_parts list is used to collect text blocks before appending to transcript."""
-        assert "response_parts: list[str] = []" in self.chat_session_source
-        assert "response_parts.append(block.text)" in self.chat_session_source
+        assert "response_parts: list[str] = []" in self.run_executor_source
+        assert "response_parts.append(block.text)" in self.run_executor_source
 
     def test_imports_memory_config(self):
         """Runtime module still provisions memory paths."""
@@ -155,37 +157,34 @@ class TestServerSourceContracts:
 
     def test_transcript_records_agent(self):
         """target_agent must be recorded in transcript.agents_used."""
-        assert "transcript.record_agent(agent_name)" in self.chat_session_source
+        assert "transcript.record_agent(agent_name)" in self.run_executor_source
 
     def test_dispatch_plan_event_emitted(self):
         """WebSocket chat loop emits dispatch_plan for hierarchical routing UI."""
-        assert '"type": "dispatch_plan"' in self.chat_session_source
-        assert "dispatch_plan.to_payload()" in self.chat_session_source
+        assert '"type": "dispatch_plan"' in self.dispatch_orchestrator_source
+        assert "dispatch_plan.to_payload()" in self.dispatch_orchestrator_source
 
     def test_run_route_metadata_is_persisted(self):
         """Run rows persist route-level task metadata fields."""
-        assert "task_type=route.task_type" in self.chat_session_source
-        assert "subtask_id=route.subtask_id" in self.chat_session_source
-        assert "skill=route.skill" in self.chat_session_source
+        assert "task_type=route.task_type" in self.run_executor_source
+        assert "subtask_id=route.subtask_id" in self.run_executor_source
+        assert "skill=route.skill" in self.run_executor_source
 
     def test_selected_model_is_applied_before_query(self):
         """WebSocket chat loop must apply active model before querying."""
-        src = self.chat_session_source
+        src = self.run_executor_source
         set_model_pos = src.index("await client.set_model(active_model)")
-        if "await client.query(run_message, session_id=self.session_id)" in src:
-            query_pos = src.index("await client.query(run_message, session_id=self.session_id)")
-        else:
-            query_pos = src.index("await client.query(user_message, session_id=self.session_id)")
+        query_pos = src.index("await client.query(run_message, session_id=session_id)")
         assert set_model_pos < query_pos
 
     def test_model_unavailable_returns_typed_error(self):
         """Unavailable user-selected model returns typed error contract."""
-        assert '"error": "model_unavailable"' in self.chat_session_source
+        assert '"error": "model_unavailable"' in self.run_executor_source
 
     def test_model_capability_mismatch_returns_typed_error(self):
         """Tool-required turns on chat-only models return typed capability mismatch."""
-        assert '"error": "model_capability_mismatch"' in self.chat_session_source
-        assert '"capability": "tools"' in self.chat_session_source
+        assert '"error": "model_capability_mismatch"' in self.run_executor_source
+        assert '"capability": "tools"' in self.run_executor_source
 
     def test_invalid_agent_returns_typed_error(self):
         """Unknown/disabled target agent returns typed error contract via chat_engine."""
