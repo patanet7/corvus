@@ -2,6 +2,7 @@
 anthropic
 claude-agent-sdk
 fastapi
+litellm
 uvicorn[standard]
 websockets
 pydantic
