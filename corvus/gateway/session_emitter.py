@@ -12,53 +12,17 @@ from collections.abc import Callable, Coroutine
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
+from corvus.gateway.protocol import (
+    PERSISTED_SESSION_EVENT_TYPES as _PERSISTED_SESSION_EVENT_TYPES,
+    PERSISTED_RUN_EVENT_TYPES as _PERSISTED_RUN_EVENT_TYPES,
+    TRACE_EVENT_TYPES as _TRACE_EVENT_TYPES,
+)
+
 if TYPE_CHECKING:
     from corvus.gateway.chat_session import TurnContext
     from corvus.gateway.runtime import GatewayRuntime
 
 logger = logging.getLogger("corvus-gateway")
-
-
-# ---------------------------------------------------------------------------
-# Event type sets (copied verbatim from chat_session.py)
-# ---------------------------------------------------------------------------
-
-_PERSISTED_SESSION_EVENT_TYPES = {
-    "dispatch_start",
-    "dispatch_plan",
-    "dispatch_complete",
-    "run_start",
-    "run_phase",
-    "run_output_chunk",
-    "run_complete",
-    "task_start",
-    "task_progress",
-    "task_complete",
-    "tool_start",
-    "tool_result",
-    "tool_permission_decision",
-    "confirm_request",
-    "confirm_response",
-    "interrupt_ack",
-}
-
-_PERSISTED_RUN_EVENT_TYPES = {
-    "run_start",
-    "run_phase",
-    "run_output_chunk",
-    "run_complete",
-    "tool_start",
-    "tool_result",
-    "tool_permission_decision",
-    "confirm_request",
-    "confirm_response",
-}
-
-_TRACE_EVENT_TYPES = _PERSISTED_SESSION_EVENT_TYPES | {
-    "routing",
-    "agent_status",
-    "error",
-}
 
 
 # ---------------------------------------------------------------------------
