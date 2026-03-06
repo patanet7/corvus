@@ -14,14 +14,12 @@ Adding a new provider: add to providers: section in config/models.yaml + set env
 from __future__ import annotations
 
 import logging
-import os
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+import httpx
 import yaml
-
-from corvus.ollama_probe import probe_ollama_models, resolve_ollama_url
 
 logger = logging.getLogger("corvus-gateway.model_router")
 
@@ -269,16 +267,49 @@ class ModelRouter:
 
     # --- Dynamic model discovery ---
 
-    def discover_models(self) -> None:
-        """Probe all configured backends and populate available models.
+    def discover_models(self, litellm_base_url: str = "http://127.0.0.1:4000") -> None:
+        """Query LiteLLM proxy for available models.
 
-        Call this at startup and periodically to refresh.  Results are
-        cached in ``self._discovered_models``.
+        Falls back to config-based discovery if LiteLLM is unreachable
+        (e.g. during tests without a running proxy).
         """
         models: list[ModelInfo] = []
 
-        # 1. SDK-native models (Claude) — available if ANTHROPIC_API_KEY is set
-        claude_available = bool(os.environ.get("ANTHROPIC_API_KEY"))
+        try:
+            resp = httpx.get(f"{litellm_base_url}/models", timeout=5.0)
+            if resp.status_code == 200:
+                data = resp.json()
+                for model_data in data.get("data", []):
+                    model_id = model_data.get("id", "")
+                    short_name = model_id
+                    backend = "litellm"
+                    for name, full_id in self._litellm_model_map().items():
+                        if model_id == full_id:
+                            short_name = name
+                            backend = "claude"
+                            break
+                    if "ollama" in model_id:
+                        backend = "ollama"
+                    supports_tools, supports_streaming = self._capabilities_for_backend(backend)
+                    models.append(
+                        ModelInfo(
+                            id=short_name,
+                            label=short_name.title() if "/" not in short_name else short_name,
+                            backend=backend,
+                            available=True,
+                            description=f"via LiteLLM — {model_id}",
+                            is_default=short_name == self.default_model,
+                            supports_tools=supports_tools,
+                            supports_streaming=supports_streaming,
+                        )
+                    )
+                self._discovered_models = models
+                logger.info("Discovered %d models from LiteLLM proxy", len(models))
+                return
+        except Exception:
+            logger.warning("LiteLLM proxy unreachable, falling back to config-based discovery")
+
+        # Fallback: populate from config (for tests and offline scenarios)
         for model_name in sorted(self._sdk_native_models - {"inherit"}):
             supports_tools, supports_streaming = self._capabilities_for_backend("claude")
             models.append(
@@ -286,61 +317,15 @@ class ModelRouter:
                     id=model_name,
                     label=model_name.title(),
                     backend="claude",
-                    available=claude_available,
+                    available=True,
                     description=f"Claude {model_name.title()}",
                     is_default=model_name == self.default_model,
                     supports_tools=supports_tools,
                     supports_streaming=supports_streaming,
                 )
             )
-
-        # 2. Ollama models — probe configured URLs
-        ollama_cfg = self._backends.get("ollama", {})
-        if ollama_cfg.get("type") == "env_swap":
-            candidate_urls = ollama_cfg.get("urls", [])
-            if not candidate_urls:
-                env_url = os.environ.get("OLLAMA_BASE_URL")
-                if env_url:
-                    candidate_urls = [env_url]
-            resolved = resolve_ollama_url(candidate_urls) if candidate_urls else None
-            if resolved:
-                supports_tools, supports_streaming = self._capabilities_for_backend("ollama")
-                for name in probe_ollama_models(resolved):
-                    if not self._is_chat_ollama_model(name):
-                        continue
-                    models.append(
-                        ModelInfo(
-                            id=f"ollama/{name}",
-                            label=name,
-                            backend="ollama",
-                            available=True,
-                            description=f"Ollama — {resolved}",
-                            supports_tools=supports_tools,
-                            supports_streaming=supports_streaming,
-                        )
-                    )
-
-        # 3. OpenAI — available if key is set
-        if "openai" in self._backends and os.environ.get("OPENAI_API_KEY"):
-            supports_tools, supports_streaming = self._capabilities_for_backend("openai")
-            models.append(
-                ModelInfo(
-                    id="openai/gpt-4o",
-                    label="GPT-4o",
-                    backend="openai",
-                    available=True,
-                    description="OpenAI GPT-4o",
-                    supports_tools=supports_tools,
-                    supports_streaming=supports_streaming,
-                )
-            )
-
         self._discovered_models = models
-        logger.info(
-            "Discovered %d models (%d available)",
-            len(models),
-            sum(1 for m in models if m.available),
-        )
+        logger.info("Config-based discovery: %d models", len(models))
 
     def list_available_models(self) -> list[ModelInfo]:
         """Return all discovered models. Call discover_models() first."""
@@ -364,11 +349,13 @@ class ModelRouter:
         return None
 
     @staticmethod
-    def _is_chat_ollama_model(name: str) -> bool:
-        """Heuristic filter for chat-capable Ollama models in UI selection."""
-        lowered = name.lower()
-        # Hide known embedding-only models from chat model selector.
-        return "embed" not in lowered
+    def _litellm_model_map() -> dict[str, str]:
+        """Short name -> LiteLLM model ID for SDK-native models."""
+        return {
+            "haiku": "anthropic/claude-haiku-4-5-20251001",
+            "sonnet": "anthropic/claude-sonnet-4-20250514",
+            "opus": "anthropic/claude-opus-4-20250514",
+        }
 
     @staticmethod
     def _capabilities_for_backend(backend: str) -> tuple[bool, bool]:
