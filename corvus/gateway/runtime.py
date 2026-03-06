@@ -7,7 +7,6 @@ scheduler, supervisor) so server.py can stay as a thin composition root.
 from __future__ import annotations
 
 import logging
-import os
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -19,7 +18,6 @@ from corvus.break_glass import BreakGlassManager
 from corvus.capabilities.config import CapabilitiesConfig
 from corvus.capabilities.modules import TOOL_MODULE_DEFS
 from corvus.capabilities.registry import CapabilitiesRegistry
-from corvus.client_pool import SDKClientPool
 from corvus.config import (
     CAPABILITIES_CONFIG,
     CLAUDE_RUNTIME_HOME,
@@ -39,8 +37,8 @@ from corvus.gateway.task_planner import TaskPlanner
 from corvus.gateway.trace_hub import TraceHub
 from corvus.memory import MemoryConfig, MemoryHub
 from corvus.memory.backends.protocol import MemoryBackend
+from corvus.litellm_manager import LiteLLMManager
 from corvus.model_router import ModelRouter
-from corvus.ollama_probe import probe_ollama_models, resolve_ollama_url
 from corvus.router import RouterAgent
 from corvus.sanitize import register_credential_patterns
 from corvus.scheduler import CronScheduler
@@ -56,7 +54,7 @@ class GatewayRuntime:
 
     emitter: EventEmitter
     model_router: ModelRouter
-    client_pool: SDKClientPool
+    litellm_manager: LiteLLMManager
     agent_registry: AgentRegistry
     capabilities_registry: CapabilitiesRegistry
     memory_hub: MemoryHub
@@ -89,36 +87,12 @@ def init_credentials() -> None:
 
 
 def _build_router_agent(agent_registry: AgentRegistry, model_router: ModelRouter) -> RouterAgent:
-    """Build RouterAgent with Ollama fallback for non-Claude setups."""
-    router_kwargs: dict[str, object] = {"registry": agent_registry}
+    """Build RouterAgent.
 
-    # When Anthropic credentials are absent, route classification can use Ollama.
-    if not os.environ.get("ANTHROPIC_API_KEY"):
-        ollama_cfg = model_router.get_backend_config("ollama")
-        ollama_urls = ollama_cfg.get("urls", []) if ollama_cfg else []
-        if not ollama_urls:
-            env_ollama = os.environ.get("OLLAMA_BASE_URL")
-            if env_ollama:
-                ollama_urls = [env_ollama]
-
-        resolved = resolve_ollama_url(ollama_urls) if ollama_urls else None
-        if resolved:
-            router_kwargs["api_key"] = "ollama"
-            router_kwargs["base_url"] = resolved
-            available = probe_ollama_models(resolved)
-            small_models = [
-                model for model in available if any(token in model for token in ["8b", "4b", "3b", "mini", "haiku"])
-            ]
-            router_kwargs["model"] = small_models[0] if small_models else (available[0] if available else "qwen3:8b")
-            logger.info(
-                "Router: using Ollama backend at %s (model=%s)",
-                resolved,
-                router_kwargs["model"],
-            )
-        else:
-            logger.warning("Router: no Anthropic key and no reachable Ollama; fallback router mode active")
-
-    return RouterAgent(**router_kwargs)
+    LiteLLM handles backend routing and fallbacks, so no Ollama probing needed.
+    """
+    del model_router  # Unused — LiteLLM handles backend selection.
+    return RouterAgent(registry=agent_registry)
 
 
 def ensure_dirs() -> None:
@@ -175,7 +149,7 @@ def build_runtime() -> GatewayRuntime:
     emitter.register_sink(JSONLFileSink(EVENTS_LOG))
 
     model_router = ModelRouter.from_file(Path("config/models.yaml"))
-    client_pool = SDKClientPool(model_router=model_router)
+    litellm_manager = LiteLLMManager()
     init_credentials()
 
     agent_registry = AgentRegistry(config_dir=Path("config/agents"))
@@ -247,7 +221,7 @@ def build_runtime() -> GatewayRuntime:
     return GatewayRuntime(
         emitter=emitter,
         model_router=model_router,
-        client_pool=client_pool,
+        litellm_manager=litellm_manager,
         agent_registry=agent_registry,
         capabilities_registry=capabilities_registry,
         memory_hub=memory_hub,

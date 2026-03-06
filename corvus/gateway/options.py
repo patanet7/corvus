@@ -8,7 +8,7 @@ import re
 import shutil
 from collections.abc import Awaitable, Callable
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 from claude_agent_sdk import ClaudeAgentOptions, HookMatcher
 from claude_agent_sdk.types import PermissionResultAllow, PermissionResultDeny, ToolPermissionContext
@@ -25,9 +25,6 @@ from corvus.gateway.confirm_queue import ConfirmQueue
 from corvus.gateway.runtime import GatewayRuntime
 from corvus.hooks import create_hooks
 from corvus.permissions import evaluate_tool_permission, expand_confirm_gated_tools, normalize_permission_mode
-
-if TYPE_CHECKING:
-    from corvus.model_router import ModelRouter
 
 logger = logging.getLogger("corvus-gateway")
 
@@ -369,61 +366,20 @@ def resolve_backend_and_model(
 ) -> tuple[str, str]:
     """Resolve backend/model pair for the next SDK query.
 
-    requested_model may be plain model token (for example ``sonnet``) or
-    backend-qualified (for example ``ollama/llama3.2:3b``).
-
-    When the resolved backend differs from the configured backend (due to
-    fallback) and the configured model is sdk-native (sonnet/haiku/opus),
-    the model is remapped to an actual model on the fallback backend.
+    With LiteLLM proxy handling routing, this just returns the configured
+    model name. LiteLLM handles fallbacks, retries, and backend selection.
     """
-    resolved_backend = runtime.client_pool.resolve_backend(agent_name)
-
     if requested_model:
         token = requested_model.strip()
         if "/" in token:
             prefix, _, model_name = token.partition("/")
-            if prefix in runtime.model_router.list_backends() and model_name:
+            if model_name:
                 return prefix, model_name
-        return resolved_backend, token
+        return "litellm", token
 
     configured = runtime.model_router.get_model(agent_name).strip()
-    if "/" in configured:
-        _, _, model_name = configured.partition("/")
-        if model_name:
-            return resolved_backend, model_name
-
-    # When the backend fell back (e.g. claude → ollama) and the configured
-    # model is sdk-native (sonnet/haiku/opus), that model name is invalid
-    # for the fallback backend.  Pick the first available model instead.
-    configured_backend = runtime.model_router.get_backend(agent_name)
-    if resolved_backend != configured_backend and configured in runtime.model_router._sdk_native_models:
-        fallback_model = _pick_fallback_model(runtime.model_router, resolved_backend)
-        if fallback_model:
-            logger.info(
-                "Model '%s' is sdk-native but backend fell back to '%s'; "
-                "remapping to '%s'",
-                configured,
-                resolved_backend,
-                fallback_model,
-            )
-            return resolved_backend, fallback_model
-
-    return resolved_backend, configured
-
-
-def _pick_fallback_model(router: ModelRouter, backend_name: str) -> str | None:
-    """Return the first available model for *backend_name*, or None."""
-    available = router.list_available_models()
-    for model_info in available:
-        if model_info.backend == backend_name:
-            model_id = model_info.id
-            # ModelInfo.id is backend-qualified (e.g. "ollama/llama3:8b")
-            if "/" in model_id:
-                _, _, name = model_id.partition("/")
-                if name:
-                    return name
-            return model_id
-    return None
+    backend = runtime.model_router.get_backend(agent_name)
+    return backend, configured
 
 
 def ui_default_model(runtime: GatewayRuntime) -> str:
@@ -443,7 +399,6 @@ def build_backend_options(
     user: str,
     websocket: WebSocket | None,
     backend_name: str,
-    backend_env: dict[str, str],
     active_model: str,
     agent_name: str | None = None,
     ws_callback: Callable[[dict[str, Any]], Awaitable[None]] | None = None,
@@ -462,7 +417,6 @@ def build_backend_options(
         agent_name=agent_name,
         confirm_queue=confirm_queue,
     )
-    opts.env = {**opts.env, **backend_env}
     apply_claude_runtime_env(
         opts,
         runtime_home=resolve_claude_runtime_home(

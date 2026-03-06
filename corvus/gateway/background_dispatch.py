@@ -317,13 +317,11 @@ async def execute_planned_background_dispatch(
                 payload=event,
             )
 
-        backend_env = runtime.client_pool.build_env(backend_name)
         client_options = build_backend_options(
             runtime=runtime,
             user=session_owner,
             websocket=None,
             backend_name=backend_name,
-            backend_env=backend_env,
             active_model=active_model,
             agent_name=route.agent,
             ws_callback=_capture_hook_event,

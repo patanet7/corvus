@@ -715,8 +715,6 @@ class ChatSession:
                     context_limit=context_limit,
                 )
 
-            backend_env = self.runtime.client_pool.build_env(backend_name)
-
             # Nested closure — SDK hook callback that enriches payloads with
             # dispatch/run/agent context, then forwards via self.send().
             async def _run_hook_ws_callback(payload: dict) -> None:
@@ -745,7 +743,6 @@ class ChatSession:
                 user=self.user,
                 websocket=self.websocket,
                 backend_name=backend_name,
-                backend_env=backend_env,
                 active_model=active_model,
                 agent_name=agent_name,
                 ws_callback=_run_hook_ws_callback,

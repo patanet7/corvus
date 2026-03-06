@@ -17,6 +17,7 @@ load_dotenv()
 import logging
 import os
 from collections.abc import AsyncGenerator
+from pathlib import Path
 from contextlib import asynccontextmanager
 
 import uvicorn
@@ -60,7 +61,6 @@ session_mgr = runtime.session_mgr
 scheduler = runtime.scheduler
 supervisor = runtime.supervisor
 model_router = runtime.model_router
-client_pool = runtime.client_pool
 router_agent = runtime.router_agent
 
 
@@ -95,6 +95,7 @@ async def lifespan(_app: FastAPI) -> AsyncGenerator[None]:
     del _app
     ensure_dirs()
 
+    await runtime.litellm_manager.start(Path("config/models.yaml"))
     runtime.model_router.discover_models()
 
     await runtime.supervisor.start()
@@ -105,6 +106,8 @@ async def lifespan(_app: FastAPI) -> AsyncGenerator[None]:
     logger.info("CronScheduler started with %d schedules", len(runtime.scheduler.schedules))
 
     yield
+
+    await runtime.litellm_manager.stop()
 
     await runtime.scheduler.stop()
     logger.info("CronScheduler stopped")
