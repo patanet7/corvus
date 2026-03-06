@@ -14,14 +14,15 @@ import logging
 from corvus.gateway.confirm_queue import ConfirmQueue
 import uuid
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import datetime
 
-from fastapi import WebSocket, WebSocketDisconnect
+from fastapi import WebSocket
 
-from corvus.config import MAX_PARALLEL_AGENT_RUNS
 from corvus.gateway.chat_engine import ChatDispatchResolution, resolve_chat_dispatch, resolve_default_agent
-from corvus.gateway.dispatch_metrics import summarize_dispatch_runs
-from corvus.gateway.dispatch_runtime import execute_dispatch_runs
+from corvus.gateway.dispatch_orchestrator import (
+    dispatch_control_listener as _dispatch_control,
+    execute_dispatch_lifecycle as _execute_dispatch,
+)
 from corvus.gateway.options import (
     any_llm_configured,
     ui_default_model,
@@ -214,71 +215,8 @@ class ChatSession:
     # ------------------------------------------------------------------
 
     async def dispatch_control_listener(self) -> None:
-        """Listen for interrupt/ping/confirm messages during active dispatch.
-
-        Runs concurrently with dispatch execution. Reads control messages
-        from the WebSocket and handles interrupt, ping, confirm_response,
-        and dispatch-in-progress rejection for new prompts.
-        """
-        assert self._current_turn is not None, "dispatch_control_listener requires an active TurnContext"
-        assert self.websocket is not None, "dispatch_control_listener requires an active WebSocket"
-
-        turn = self._current_turn
-
-        while not turn.dispatch_interrupted.is_set():
-            control_data = await self.websocket.receive_text()
-            try:
-                control_msg = json.loads(control_data)
-            except json.JSONDecodeError:
-                await self.send({"type": "error", "message": "Invalid JSON"})
-                continue
-
-            control_type = control_msg.get("type")
-            if control_type == "interrupt":
-                self.runtime.dispatch_controls.request_interrupt(turn.dispatch_id, user=self.user, source="ws")
-                logger.info("User interrupted dispatch %s", turn.dispatch_id)
-                await self.runtime.emitter.emit("session_interrupt", user=self.user, session_id=self.session_id)
-                await self.send(
-                    {
-                        "type": "interrupt_ack",
-                        "dispatch_id": turn.dispatch_id,
-                        "session_id": self.session_id,
-                        "turn_id": turn.turn_id,
-                        "status": "interrupting",
-                    },
-                    persist=True,
-                    dispatch_id=turn.dispatch_id,
-                    turn_id=turn.turn_id,
-                )
-                return
-            if control_type == "ping":
-                await self.send({"type": "pong"})
-                continue
-            if control_type == "confirm_response":
-                call_id = control_msg.get("tool_call_id")
-                approved = control_msg.get("approved", False)
-                await self.send(
-                    {
-                        "type": "confirm_response",
-                        "tool_call_id": call_id,
-                        "approved": bool(approved),
-                    },
-                    persist=True,
-                    dispatch_id=turn.dispatch_id,
-                    turn_id=turn.turn_id,
-                )
-                self.confirm_queue.respond(call_id, approved=bool(approved))
-                continue
-            if control_msg.get("message"):
-                await self.send(
-                    {
-                        "type": "error",
-                        "error": "dispatch_in_progress",
-                        "message": "Dispatch already in progress; wait or interrupt before sending a new prompt.",
-                    }
-                )
-                continue
-            await self.send({"type": "error", "message": "Unsupported control message while dispatch is active"})
+        """Listen for interrupt/ping/confirm messages during active dispatch."""
+        await _dispatch_control(self)
 
     # ------------------------------------------------------------------
     # _degraded_message_loop — ported from claw/api/chat.py lines 133-155
@@ -324,192 +262,16 @@ class ChatSession:
         user_model: str | None,
         requires_tools: bool,
     ) -> None:
-        """Execute the full dispatch lifecycle for a single user turn.
-
-        Handles: persist dispatch row → emit events → record message →
-        create TurnContext → execute runs → summarize → emit completion → cleanup.
-        """
-        run_requests = resolution.run_requests
-        target_agents = resolution.target_agents
-        dispatch_mode = resolution.dispatch_mode
-        dispatch_plan = resolution.dispatch_plan
-
-        try:
-            self.runtime.session_mgr.create_dispatch(
-                dispatch_id,
-                session_id=self.session_id,
-                turn_id=turn_id,
-                user=self.user,
-                prompt=user_message,
-                dispatch_mode=dispatch_mode,
-                target_agents=target_agents,
-                status="routing",
-            )
-        except Exception:
-            logger.exception("Failed to persist dispatch row dispatch_id=%s", dispatch_id)
-
-        await self.send(
-            {
-                "type": "dispatch_start",
-                "dispatch_id": dispatch_id,
-                "session_id": self.session_id,
-                "turn_id": turn_id,
-                "dispatch_mode": dispatch_mode,
-                "target_agents": target_agents,
-                "message": _preview_summary(user_message, limit=140),
-            },
-            persist=True,
+        """Execute the full dispatch lifecycle for a single user turn."""
+        await _execute_dispatch(
+            self,
             dispatch_id=dispatch_id,
             turn_id=turn_id,
-        )
-        await self.send(
-            {
-                "type": "dispatch_plan",
-                "dispatch_id": dispatch_id,
-                "session_id": self.session_id,
-                "turn_id": turn_id,
-                **dispatch_plan.to_payload(),
-            },
-            persist=True,
-            dispatch_id=dispatch_id,
-            turn_id=turn_id,
-        )
-        await self.runtime.emitter.emit(
-            "dispatch_plan_resolved",
-            dispatch_id=dispatch_id,
-            session_id=self.session_id,
-            turn_id=turn_id,
-            task_type=dispatch_plan.task_type,
-            decomposed=dispatch_plan.decomposed,
-            strategy=dispatch_plan.strategy,
-            route_count=len(run_requests),
-            target_agents=target_agents,
-        )
-
-        self.transcript.messages.append({"role": "user", "content": user_message})
-        self.runtime.session_mgr.add_message(
-            session_id=self.session_id,
-            role="user",
-            content=user_message,
-            agent=run_requests[0].agent if len(run_requests) == 1 else "general",
-            model=user_model,
-        )
-        dispatch_interrupted = asyncio.Event()
-        self.runtime.dispatch_controls.register(
-            dispatch_id=dispatch_id,
-            session_id=self.session_id,
-            user=self.user,
-            turn_id=turn_id,
-            interrupt_event=dispatch_interrupted,
-        )
-
-        turn = TurnContext(
-            dispatch_id=dispatch_id,
-            turn_id=turn_id,
-            dispatch_interrupted=dispatch_interrupted,
+            resolution=resolution,
+            user_message=user_message,
             user_model=user_model,
             requires_tools=requires_tools,
         )
-        self._current_turn = turn
-
-        control_listener_task: asyncio.Task[None] | None = None
-        try:
-            control_listener_task = asyncio.create_task(self.dispatch_control_listener())
-            run_results = await execute_dispatch_runs(
-                dispatch_mode=dispatch_mode,
-                run_requests=run_requests,
-                max_parallel_agent_runs=MAX_PARALLEL_AGENT_RUNS,
-                execute_run=self.execute_agent_run,
-                logger=logger,
-                dispatch_interrupted=dispatch_interrupted,
-            )
-
-            summary = summarize_dispatch_runs(run_results, interrupted=dispatch_interrupted.is_set())
-            self.runtime.session_mgr.update_dispatch(
-                dispatch_id,
-                status=summary.status,
-                error=summary.error,
-                completed_at=datetime.now(UTC),
-            )
-
-            await self.send(
-                {
-                    "type": "dispatch_complete",
-                    "dispatch_id": dispatch_id,
-                    "session_id": self.session_id,
-                    "turn_id": turn_id,
-                    "status": summary.status,
-                    "task_type": dispatch_plan.task_type,
-                    "decomposed": dispatch_plan.decomposed,
-                    "strategy": dispatch_plan.strategy,
-                    "target_agents": target_agents,
-                    "total_runs": summary.total_runs,
-                    "success_count": summary.success_count,
-                    "error_count": summary.error_count,
-                    "interrupted_count": summary.interrupted_count,
-                    "cost_usd": summary.cost_usd,
-                    "max_parallel": MAX_PARALLEL_AGENT_RUNS,
-                },
-                persist=True,
-                dispatch_id=dispatch_id,
-                turn_id=turn_id,
-            )
-            await self.runtime.emitter.emit(
-                "dispatch_completed",
-                dispatch_id=dispatch_id,
-                session_id=self.session_id,
-                turn_id=turn_id,
-                status=summary.status,
-                task_type=dispatch_plan.task_type,
-                decomposed=dispatch_plan.decomposed,
-                strategy=dispatch_plan.strategy,
-                total_runs=summary.total_runs,
-                success_count=summary.success_count,
-                error_count=summary.error_count,
-                interrupted_count=summary.interrupted_count,
-                cost_usd=summary.cost_usd,
-                tokens_used=summary.tokens_used,
-            )
-            await self.send(
-                {
-                    "type": "done",
-                    "session_id": self.session_id,
-                    "cost_usd": summary.cost_usd,
-                    "tokens_used": summary.tokens_used,
-                    "context_limit": summary.max_context_limit,
-                    "context_pct": summary.max_context_pct,
-                }
-            )
-        except Exception:
-            logger.exception("Dispatch failed dispatch_id=%s", dispatch_id)
-            self.runtime.session_mgr.update_dispatch(
-                dispatch_id,
-                status="error",
-                error="dispatch_execution_error",
-                completed_at=datetime.now(UTC),
-            )
-            await self.send(
-                {
-                    "type": "error",
-                    "message": "Internal error: dispatch_execution_error",
-                }
-            )
-        finally:
-            if control_listener_task is not None:
-                if not control_listener_task.done():
-                    control_listener_task.cancel()
-                try:
-                    await control_listener_task
-                except asyncio.CancelledError:
-                    pass
-                except WebSocketDisconnect:
-                    raise
-                except Exception:
-                    logger.exception("Dispatch control listener failed")
-            self.runtime.dispatch_controls.unregister(dispatch_id)
-            self._current_turn = None
-            self.confirm_queue.cancel_all()
-            self.current_turn_id = None
 
     # ------------------------------------------------------------------
     # run — main message loop

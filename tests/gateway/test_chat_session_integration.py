@@ -82,14 +82,19 @@ def _read_source(relative_parts: list[str]) -> str:
 
 @skip_no_sdk
 class TestModelWiringContracts:
-    """Source-level contract tests verifying model selection pipeline wiring."""
+    """Source-level contract tests verifying model selection pipeline wiring.
+
+    The model wiring logic (resolve_backend_and_model, set_model, error paths)
+    was extracted from ChatSession into run_executor.py. These tests verify the
+    contract in the module that actually owns the code.
+    """
 
     @pytest.fixture(autouse=True)
     def _load_source(self) -> None:
-        self.source = _read_source(["corvus", "gateway", "chat_session.py"])
+        self.source = _read_source(["corvus", "gateway", "run_executor.py"])
 
     def test_resolve_backend_and_model_is_called(self) -> None:
-        """chat_session.py must call resolve_backend_and_model(."""
+        """run_executor.py must call resolve_backend_and_model(."""
         assert "resolve_backend_and_model(" in self.source
 
     def test_user_model_passed_to_resolve(self) -> None:
@@ -119,7 +124,7 @@ class TestModelWiringContracts:
         assert unavailable_idx != mismatch_idx
 
     def test_ui_model_id_sent_to_frontend(self) -> None:
-        """Source must call ui_model_id( to produce frontend-facing model identifiers."""
+        """run_executor.py must call ui_model_id( to produce frontend-facing model identifiers."""
         assert "ui_model_id(" in self.source
         # Verify it is imported at module level
         assert "from corvus.gateway.options import" in self.source
