@@ -283,11 +283,18 @@ class ModelRouter:
                     model_id = model_data.get("id", "")
                     short_name = model_id
                     backend = "litellm"
-                    for name, full_id in self._litellm_model_map().items():
-                        if model_id == full_id:
-                            short_name = name
-                            backend = "claude"
-                            break
+                    # Match by short name OR full LiteLLM model ID
+                    model_map = self._litellm_model_map()
+                    if model_id in model_map:
+                        # Proxy returned short name (e.g. "haiku")
+                        short_name = model_id
+                        backend = "claude"
+                    else:
+                        for name, full_id in model_map.items():
+                            if model_id == full_id:
+                                short_name = name
+                                backend = "claude"
+                                break
                     if "ollama" in model_id:
                         backend = "ollama"
                     supports_tools, supports_streaming = self._capabilities_for_backend(backend)
