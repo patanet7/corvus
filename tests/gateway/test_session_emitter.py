@@ -195,12 +195,23 @@ class TestSessionEmitterSend:
             ws_send=None,
         )
 
+        # Seed a dispatch so the trace FK constraint is satisfied
+        dispatch_id = str(uuid4())
+        rt.session_mgr.create_dispatch(
+            dispatch_id,
+            session_id=session_id,
+            user=user,
+            prompt="traced event",
+            dispatch_mode="single",
+            target_agents=["test-agent"],
+        )
+
         # Subscribe to trace hub before sending
         queue = rt.trace_hub.subscribe()
 
         payload = {
             "type": "dispatch_start",
-            "dispatch_id": str(uuid4()),
+            "dispatch_id": dispatch_id,
             "session_id": session_id,
             "message": "traced event",
         }
