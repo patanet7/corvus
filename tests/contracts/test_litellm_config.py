@@ -1,8 +1,12 @@
-"""Behavioral tests for LiteLLM config generation from models.yaml."""
+"""Behavioral tests for LiteLLM config generation and role-aware model discovery."""
 
 import yaml
 import pytest
 from pathlib import Path
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from corvus.model_router import ModelRouter
 
 
 class TestConfigTranslation:
@@ -149,3 +153,144 @@ class TestLiteLLMManagerLifecycle:
         assert out.exists()
         reloaded = yaml.safe_load(out.read_text())
         assert "model_list" in reloaded
+
+
+class TestLiteLLMConfigFromYAML:
+    """Verify litellm: section in models.yaml is read by generate_litellm_config."""
+
+    def test_litellm_section_overrides_router_settings(self, tmp_path: Path) -> None:
+        from corvus.litellm_manager import generate_litellm_config
+
+        config = {
+            "defaults": {"model": "sonnet", "backend": "claude"},
+            "backends": {"claude": {"type": "sdk_native"}},
+            "litellm": {
+                "num_retries": 7,
+                "cooldown_time": 60,
+                "retry_after": 10,
+                "routing_strategy": "least-busy",
+            },
+        }
+        p = tmp_path / "models.yaml"
+        p.write_text(yaml.dump(config))
+        result = generate_litellm_config(p)
+        rs = result["router_settings"]
+        assert rs["num_retries"] == 7
+        assert rs["cooldown_time"] == 60
+        assert rs["retry_after"] == 10
+        assert rs["routing_strategy"] == "least-busy"
+
+    def test_litellm_section_absent_uses_defaults(self, tmp_path: Path) -> None:
+        from corvus.litellm_manager import generate_litellm_config
+
+        config = {
+            "defaults": {"model": "sonnet", "backend": "claude"},
+            "backends": {"claude": {"type": "sdk_native"}},
+        }
+        p = tmp_path / "models.yaml"
+        p.write_text(yaml.dump(config))
+        result = generate_litellm_config(p)
+        rs = result["router_settings"]
+        assert rs["num_retries"] == 3
+        assert rs["cooldown_time"] == 30
+        assert rs["routing_strategy"] == "simple-shuffle"
+
+
+class TestRoleAwareDiscovery:
+    """Verify agent-model assignment tracking and validation."""
+
+    @staticmethod
+    def _router_with_agents(tmp_path: Path) -> "ModelRouter":
+        from corvus.model_router import ModelRouter
+
+        config = {
+            "defaults": {"model": "sonnet", "backend": "claude"},
+            "agents": {
+                "finance": {"model": "opus", "params": {"temperature": 0.2}},
+                "router": {"model": "haiku"},
+                "music": {"model": "haiku", "backend": "ollama"},
+            },
+            "backends": {"claude": {"type": "sdk_native"}},
+        }
+        p = tmp_path / "models.yaml"
+        p.write_text(yaml.dump(config))
+        return ModelRouter.from_file(p)
+
+    def test_agent_assignments_returns_all_agents(self, tmp_path: Path) -> None:
+        router = self._router_with_agents(tmp_path)
+        router.discover_models()
+        assignments = router.get_agent_model_assignments()
+        agent_names = {a["agent"] for a in assignments}
+        assert "finance" in agent_names
+        assert "router" in agent_names
+        assert "music" in agent_names
+
+    def test_agent_assignments_include_model_and_backend(self, tmp_path: Path) -> None:
+        router = self._router_with_agents(tmp_path)
+        router.discover_models()
+        assignments = router.get_agent_model_assignments()
+        finance = next(a for a in assignments if a["agent"] == "finance")
+        assert finance["model"] == "opus"
+        assert finance["backend"] == "claude"
+
+    def test_agent_assignments_include_params(self, tmp_path: Path) -> None:
+        router = self._router_with_agents(tmp_path)
+        router.discover_models()
+        assignments = router.get_agent_model_assignments()
+        finance = next(a for a in assignments if a["agent"] == "finance")
+        assert finance["params"]["temperature"] == 0.2
+
+    def test_agent_assignments_availability_true_for_discovered(self, tmp_path: Path) -> None:
+        router = self._router_with_agents(tmp_path)
+        router.discover_models()
+        assignments = router.get_agent_model_assignments()
+        finance = next(a for a in assignments if a["agent"] == "finance")
+        # opus is in config fallback discovery
+        assert finance["available"] is True
+
+    def test_validate_warns_on_missing_model(self, tmp_path: Path) -> None:
+        from corvus.model_router import ModelRouter
+
+        config = {
+            "defaults": {"model": "sonnet", "backend": "claude"},
+            "agents": {"test_agent": {"model": "nonexistent-model"}},
+            "backends": {"claude": {"type": "sdk_native"}},
+        }
+        p = tmp_path / "models.yaml"
+        p.write_text(yaml.dump(config))
+        router = ModelRouter.from_file(p)
+        router.discover_models()  # config fallback -- only haiku/opus/sonnet
+        warnings = router.validate_agent_assignments()
+        assert any("nonexistent-model" in w for w in warnings)
+
+    def test_validate_no_warnings_when_all_available(self, tmp_path: Path) -> None:
+        router = self._router_with_agents(tmp_path)
+        router.discover_models()
+        warnings = router.validate_agent_assignments()
+        assert len(warnings) == 0
+
+    def test_resolve_best_available_returns_preferred_when_available(self, tmp_path: Path) -> None:
+        router = self._router_with_agents(tmp_path)
+        router.discover_models()
+        assert router.resolve_best_available("sonnet") == "sonnet"
+
+    def test_resolve_best_available_falls_back_on_unavailable(self, tmp_path: Path) -> None:
+        router = self._router_with_agents(tmp_path)
+        router.discover_models()
+        result = router.resolve_best_available("nonexistent")
+        assert result in ("opus", "sonnet", "haiku")  # falls back to tier
+
+    def test_resolve_best_available_without_discovery(self, tmp_path: Path) -> None:
+        """Before discover_models(), resolve_best_available returns preferred as-is."""
+        from corvus.model_router import ModelRouter
+
+        config = {
+            "defaults": {"model": "sonnet", "backend": "claude"},
+            "agents": {},
+            "backends": {"claude": {"type": "sdk_native"}},
+        }
+        p = tmp_path / "models.yaml"
+        p.write_text(yaml.dump(config))
+        router = ModelRouter.from_file(p)
+        # No discover_models() call
+        assert router.resolve_best_available("anything") == "anything"
