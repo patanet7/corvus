@@ -427,9 +427,10 @@ def build_backend_options(
     )
     apply_workspace_context(opts, workspace_cwd=workspace_cwd)
 
-    # Non-Claude backends are currently chat-only in this runtime path.
-    # Disable tools to avoid backend/model incompatibility errors.
-    if backend_name != "claude":
+    # Backends that support tool calling (via LiteLLM translation) keep
+    # tools enabled.  Chat-only backends get tools stripped.
+    _TOOL_CAPABLE_BACKENDS = {"claude", "ollama"}
+    if backend_name not in _TOOL_CAPABLE_BACKENDS:
         opts.tools = []
         opts.allowed_tools = []
         opts.disallowed_tools = []

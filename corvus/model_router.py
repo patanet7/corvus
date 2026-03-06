@@ -429,8 +429,12 @@ class ModelRouter:
 
     @staticmethod
     def _capabilities_for_backend(backend: str) -> tuple[bool, bool]:
-        """Return effective runtime capabilities for a backend."""
-        # Current runtime wiring only enables tools/hooks on Claude.
-        if backend == "claude":
+        """Return effective runtime capabilities for a backend.
+
+        With LiteLLM routing, tool calling works for Claude and Ollama
+        models that support it (llama3, qwen3, mistral, etc.).
+        LiteLLM handles the tool-call protocol translation.
+        """
+        if backend in ("claude", "ollama"):
             return True, True
         return False, True
