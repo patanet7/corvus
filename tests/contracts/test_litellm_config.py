@@ -196,6 +196,55 @@ class TestLiteLLMConfigFromYAML:
         assert rs["routing_strategy"] == "simple-shuffle"
 
 
+class TestRealModelsYaml:
+    """Test config translation against the actual config/models.yaml."""
+
+    def test_real_config_translates(self) -> None:
+        from corvus.litellm_manager import generate_litellm_config
+
+        real_config = Path("config/models.yaml")
+        if not real_config.exists():
+            pytest.skip("config/models.yaml not found")
+        result = generate_litellm_config(real_config)
+        assert len(result["model_list"]) >= 3  # at least haiku/sonnet/opus
+        assert "router_settings" in result
+
+    def test_real_config_has_no_secrets(self) -> None:
+        from corvus.litellm_manager import generate_litellm_config
+
+        real_config = Path("config/models.yaml")
+        if not real_config.exists():
+            pytest.skip("config/models.yaml not found")
+        result = generate_litellm_config(real_config)
+        config_str = yaml.dump(result)
+        assert "sk-ant-" not in config_str
+
+    def test_real_config_sdk_native_models_present(self) -> None:
+        """All three SDK-native models must appear in the translated config."""
+        from corvus.litellm_manager import generate_litellm_config
+
+        real_config = Path("config/models.yaml")
+        if not real_config.exists():
+            pytest.skip("config/models.yaml not found")
+        result = generate_litellm_config(real_config)
+        model_names = {m["model_name"] for m in result["model_list"]}
+        for expected in ("haiku", "sonnet", "opus"):
+            assert expected in model_names, f"Missing SDK-native model: {expected}"
+
+    def test_real_config_roundtrips_through_yaml(self) -> None:
+        """Generated config must survive YAML serialize/deserialize."""
+        from corvus.litellm_manager import generate_litellm_config
+
+        real_config = Path("config/models.yaml")
+        if not real_config.exists():
+            pytest.skip("config/models.yaml not found")
+        result = generate_litellm_config(real_config)
+        serialized = yaml.dump(result, default_flow_style=False)
+        reloaded = yaml.safe_load(serialized)
+        assert reloaded["model_list"] == result["model_list"]
+        assert reloaded["router_settings"] == result["router_settings"]
+
+
 class TestRoleAwareDiscovery:
     """Verify agent-model assignment tracking and validation."""
 
