@@ -16,8 +16,6 @@ import uuid
 from dataclasses import dataclass
 from datetime import UTC, datetime
 
-from claude_agent_sdk import ClaudeSDKClient
-from claude_agent_sdk.types import AssistantMessage, ResultMessage, TextBlock
 from fastapi import WebSocket, WebSocketDisconnect
 
 from corvus.config import MAX_PARALLEL_AGENT_RUNS
@@ -26,11 +24,9 @@ from corvus.gateway.dispatch_metrics import summarize_dispatch_runs
 from corvus.gateway.dispatch_runtime import execute_dispatch_runs
 from corvus.gateway.options import (
     any_llm_configured,
-    build_backend_options,
-    resolve_backend_and_model,
     ui_default_model,
-    ui_model_id,
 )
+from corvus.gateway.run_executor import execute_agent_run as _execute_run
 from corvus.gateway.runtime import GatewayRuntime
 from corvus.gateway.session_emitter import (
     SessionEmitter,
@@ -43,7 +39,6 @@ from corvus.gateway.session_emitter import (
     _trace_summary,
 )
 from corvus.gateway.task_planner import TaskRoute
-from corvus.gateway.workspace_runtime import prepare_agent_workspace
 from corvus.session import SessionTranscript
 
 logger = logging.getLogger("corvus-gateway")
@@ -191,465 +186,28 @@ class ChatSession:
         }
 
     # ------------------------------------------------------------------
-    # execute_agent_run — ported from claw/api/chat.py lines 472-1057
+    # execute_agent_run — delegates to corvus.gateway.run_executor
     # ------------------------------------------------------------------
 
     async def execute_agent_run(self, route: TaskRoute, *, route_index: int) -> dict:
         """Execute a single agent run for one route in a dispatch plan.
 
-        Matches the RunExecutor protocol. Uses ``self._current_turn``
-        (TurnContext) for per-turn state instead of closure variables.
+        Delegates to the extracted ``run_executor.execute_agent_run`` function,
+        passing all dependencies explicitly.
         """
         turn = self._current_turn
         assert turn is not None, "execute_agent_run requires an active TurnContext"
-
-        agent_name = route.agent
-        run_id = str(uuid.uuid4())
-        task_id = f"task-{run_id[:8]}"
-        self.transcript.record_agent(agent_name)
-        route_payload = self._route_payload(route, route_index=route_index)
-        run_message = route.prompt
-        requested_model = route.requested_model or turn.user_model
-        workspace_cwd = prepare_agent_workspace(session_id=self.session_id, agent_name=agent_name)
-
-        backend_name, active_model = resolve_backend_and_model(
+        return await _execute_run(
+            emitter=self.emitter,
             runtime=self.runtime,
-            agent_name=agent_name,
-            requested_model=requested_model,
+            turn=turn,
+            route=route,
+            route_index=route_index,
+            transcript=self.transcript,
+            websocket=self.websocket,
+            user=self.user,
+            confirm_queue=self.confirm_queue,
         )
-        active_model_id = ui_model_id(backend_name, active_model)
-        model_info = self.runtime.model_router.get_model_info(active_model_id)
-        chunk_index = 0
-        response_parts: list[str] = []
-        assistant_summary = ""
-        total_cost = 0.0
-        tokens_used = 0
-        context_limit = self.runtime.model_router.get_context_limit(active_model)
-        context_pct = 0.0
-
-        # Persist the run row
-        try:
-            self.runtime.session_mgr.start_agent_run(
-                run_id,
-                dispatch_id=turn.dispatch_id,
-                session_id=self.session_id,
-                turn_id=turn.turn_id,
-                agent=agent_name,
-                backend=backend_name,
-                model=active_model_id,
-                task_type=route.task_type,
-                subtask_id=route.subtask_id,
-                skill=route.skill,
-                status="queued",
-            )
-        except Exception:
-            logger.exception("Failed to persist run row run_id=%s", run_id)
-
-        # routing event (non-persisted)
-        await self.send(
-            {
-                "type": "routing",
-                "agent": agent_name,
-                "model": active_model_id,
-                **route_payload,
-            }
-        )
-        # run_start event
-        await self.send(
-            {
-                "type": "run_start",
-                "dispatch_id": turn.dispatch_id,
-                "run_id": run_id,
-                "task_id": task_id,
-                "session_id": self.session_id,
-                "turn_id": turn.turn_id,
-                "agent": agent_name,
-                "backend": backend_name,
-                "model": active_model_id,
-                "workspace_cwd": str(workspace_cwd),
-                "status": "queued",
-                **route_payload,
-            },
-            persist=True,
-            run_id=run_id,
-            dispatch_id=turn.dispatch_id,
-            turn_id=turn.turn_id,
-        )
-        # task_start event
-        await self.send(
-            {
-                "type": "task_start",
-                "task_id": task_id,
-                "agent": agent_name,
-                "description": _preview_summary(run_message, limit=120),
-                "session_id": self.session_id,
-                "turn_id": turn.turn_id,
-                **route_payload,
-            },
-            persist=True,
-            run_id=run_id,
-            dispatch_id=turn.dispatch_id,
-            turn_id=turn.turn_id,
-        )
-
-        try:
-            # Phase: routing
-            await self._emit_phase(
-                turn,
-                run_id=run_id,
-                task_id=task_id,
-                agent=agent_name,
-                route_payload=route_payload,
-                phase="routing",
-                summary="Routing and model validation",
-            )
-            await self.runtime.emitter.emit(
-                "routing_decision",
-                agent=agent_name,
-                backend=backend_name,
-                source="websocket",
-                query_preview=run_message[:200],
-                task_type=route.task_type,
-                subtask_id=route.subtask_id,
-                skill=route.skill,
-            )
-            if turn.dispatch_interrupted.is_set():
-                raise asyncio.CancelledError
-
-            # Model capability mismatch check
-            if turn.requires_tools and model_info and not model_info.supports_tools:
-                fallback_backend, fallback_model = resolve_backend_and_model(
-                    runtime=self.runtime,
-                    agent_name=agent_name,
-                    requested_model=None,
-                )
-                suggested_model = ui_model_id(fallback_backend, fallback_model)
-                if suggested_model == active_model_id:
-                    suggested_model = ui_default_model(self.runtime)
-                await self.send(
-                    {
-                        "type": "error",
-                        "error": "model_capability_mismatch",
-                        "model": active_model_id,
-                        "capability": "tools",
-                        "suggested_model": suggested_model,
-                        "message": (
-                            f"Model `{active_model_id}` does not support tool-enabled turns. "
-                            f"Switch to `{suggested_model}` and retry."
-                        ),
-                        "agent": agent_name,
-                        **route_payload,
-                    }
-                )
-                return await self._emit_run_failure(
-                    turn,
-                    run_id=run_id,
-                    task_id=task_id,
-                    agent=agent_name,
-                    route_payload=route_payload,
-                    error_type="model_capability_mismatch",
-                    summary="Blocked: selected model cannot execute tool-enabled turn.",
-                    context_limit=context_limit,
-                )
-
-            # Nested closure — SDK hook callback that enriches payloads with
-            # dispatch/run/agent context, then forwards via self.send().
-            async def _run_hook_ws_callback(payload: dict) -> None:
-                enriched = dict(payload)
-                enriched.setdefault("dispatch_id", turn.dispatch_id)
-                enriched.setdefault("run_id", run_id)
-                enriched.setdefault("task_id", task_id)
-                enriched.setdefault("session_id", self.session_id)
-                enriched.setdefault("turn_id", turn.turn_id)
-                enriched.setdefault("agent", agent_name)
-                enriched.setdefault("task_type", route.task_type)
-                enriched.setdefault("subtask_id", route.subtask_id)
-                enriched.setdefault("skill", route.skill)
-                enriched.setdefault("instruction", route.instruction)
-                enriched.setdefault("route_index", route_index)
-                await self.send(
-                    enriched,
-                    persist=True,
-                    run_id=run_id,
-                    dispatch_id=turn.dispatch_id,
-                    turn_id=turn.turn_id,
-                )
-
-            client_options = build_backend_options(
-                runtime=self.runtime,
-                user=self.user,
-                websocket=self.websocket,
-                backend_name=backend_name,
-                active_model=active_model,
-                agent_name=agent_name,
-                ws_callback=_run_hook_ws_callback,
-                allow_secret_access=self.runtime.break_glass.is_active(
-                    user=self.user, session_id=self.session_id
-                ),
-                workspace_cwd=workspace_cwd,
-                session_id=self.session_id,
-                confirm_queue=self.confirm_queue,
-            )
-
-            async with ClaudeSDKClient(options=client_options) as client:
-                try:
-                    await client.set_model(active_model)
-                except Exception as exc:
-                    logger.warning("Failed to set model '%s': %s", active_model, exc)
-                    await self.send(
-                        {
-                            "type": "error",
-                            "error": "model_unavailable",
-                            "model": active_model_id,
-                            "message": f"Selected model unavailable: {active_model_id}",
-                            "agent": agent_name,
-                            **route_payload,
-                        }
-                    )
-                    return await self._emit_run_failure(
-                        turn,
-                        run_id=run_id,
-                        task_id=task_id,
-                        agent=agent_name,
-                        route_payload=route_payload,
-                        error_type="model_unavailable",
-                        summary="Selected model unavailable.",
-                        context_limit=context_limit,
-                    )
-
-                # Phase: planning + executing
-                await self._emit_phase(
-                    turn,
-                    run_id=run_id,
-                    task_id=task_id,
-                    agent=agent_name,
-                    route_payload=route_payload,
-                    phase="planning",
-                    summary="Preparing execution plan",
-                )
-                await self._emit_phase(
-                    turn,
-                    run_id=run_id,
-                    task_id=task_id,
-                    agent=agent_name,
-                    route_payload=route_payload,
-                    phase="executing",
-                    summary="Agent execution started",
-                )
-
-                await client.query(run_message, session_id=self.session_id)
-                async for sdk_message in client.receive_response():
-                    if turn.dispatch_interrupted.is_set():
-                        raise asyncio.CancelledError
-                    if isinstance(sdk_message, AssistantMessage):
-                        for block in sdk_message.content:
-                            if not isinstance(block, TextBlock):
-                                continue
-                            response_parts.append(block.text)
-                            assistant_summary = _preview_summary(
-                                " ".join(response_parts), limit=140
-                            )
-                            await self.send(
-                                {
-                                    "type": "run_output_chunk",
-                                    "dispatch_id": turn.dispatch_id,
-                                    "run_id": run_id,
-                                    "task_id": task_id,
-                                    "session_id": self.session_id,
-                                    "turn_id": turn.turn_id,
-                                    "agent": agent_name,
-                                    "model": active_model_id,
-                                    "chunk_index": chunk_index,
-                                    "content": block.text,
-                                    "final": False,
-                                    **route_payload,
-                                },
-                                persist=True,
-                                run_id=run_id,
-                                dispatch_id=turn.dispatch_id,
-                                turn_id=turn.turn_id,
-                            )
-                            chunk_index += 1
-                            await self.send(
-                                {
-                                    "type": "text",
-                                    "content": block.text,
-                                    "agent": agent_name,
-                                    "model": active_model_id,
-                                    "run_id": run_id,
-                                    **route_payload,
-                                }
-                            )
-                            await self.send(
-                                {
-                                    "type": "task_progress",
-                                    "task_id": task_id,
-                                    "agent": agent_name,
-                                    "status": "streaming",
-                                    "summary": assistant_summary or "Streaming response...",
-                                    "session_id": self.session_id,
-                                    "turn_id": turn.turn_id,
-                                    **route_payload,
-                                },
-                                persist=True,
-                                run_id=run_id,
-                                dispatch_id=turn.dispatch_id,
-                                turn_id=turn.turn_id,
-                            )
-                    elif isinstance(sdk_message, ResultMessage):
-                        tokens_used = int(getattr(sdk_message, "total_input_tokens", 0)) + int(
-                            getattr(sdk_message, "total_output_tokens", 0),
-                        )
-                        total_cost = float(getattr(sdk_message, "total_cost_usd", 0.0))
-                        context_pct = (
-                            round((tokens_used / context_limit) * 100, 1)
-                            if context_limit > 0
-                            else 0.0
-                        )
-
-            # Phase: compacting
-            await self._emit_phase(
-                turn,
-                run_id=run_id,
-                task_id=task_id,
-                agent=agent_name,
-                route_payload=route_payload,
-                phase="compacting",
-                summary="Compacting and finalizing response",
-            )
-            # Final output chunk marker
-            await self.send(
-                {
-                    "type": "run_output_chunk",
-                    "dispatch_id": turn.dispatch_id,
-                    "run_id": run_id,
-                    "task_id": task_id,
-                    "session_id": self.session_id,
-                    "turn_id": turn.turn_id,
-                    "agent": agent_name,
-                    "model": active_model_id,
-                    "chunk_index": chunk_index,
-                    "content": "",
-                    "final": True,
-                    "tokens_used": tokens_used,
-                    "cost_usd": total_cost,
-                    "context_limit": context_limit,
-                    "context_pct": context_pct,
-                    **route_payload,
-                },
-                persist=True,
-                run_id=run_id,
-                dispatch_id=turn.dispatch_id,
-                turn_id=turn.turn_id,
-            )
-
-            # Persist assistant response to transcript
-            if response_parts:
-                assistant_text = " ".join(response_parts)
-                self.transcript.messages.append({"role": "assistant", "content": assistant_text})
-                self.runtime.session_mgr.add_message(
-                    session_id=self.session_id,
-                    role="assistant",
-                    content=assistant_text,
-                    agent=agent_name,
-                    model=active_model_id,
-                )
-
-            # run_complete (success)
-            base = self._base_payload(
-                turn=turn,
-                run_id=run_id,
-                task_id=task_id,
-                agent=agent_name,
-                route_payload=route_payload,
-                session_id=self.session_id,
-            )
-            await self.send(
-                {
-                    "type": "run_complete",
-                    **base,
-                    "result": "success",
-                    "summary": assistant_summary or "Completed",
-                    "cost_usd": total_cost,
-                    "tokens_used": tokens_used,
-                    "context_limit": context_limit,
-                    "context_pct": context_pct,
-                },
-                persist=True,
-                run_id=run_id,
-                dispatch_id=turn.dispatch_id,
-                turn_id=turn.turn_id,
-            )
-            # task_complete (success)
-            await self.send(
-                {
-                    "type": "task_complete",
-                    "task_id": task_id,
-                    "agent": agent_name,
-                    "result": "success",
-                    "summary": assistant_summary or "Completed",
-                    "cost_usd": total_cost,
-                    "session_id": self.session_id,
-                    "turn_id": turn.turn_id,
-                    **route_payload,
-                },
-                persist=True,
-                run_id=run_id,
-                dispatch_id=turn.dispatch_id,
-                turn_id=turn.turn_id,
-            )
-
-            self.runtime.session_mgr.update_agent_run(
-                run_id,
-                status="done",
-                summary=assistant_summary or "Completed",
-                cost_usd=total_cost,
-                tokens_used=tokens_used,
-                context_limit=context_limit,
-                context_pct=context_pct,
-                completed_at=datetime.now(UTC),
-            )
-            return {
-                "result": "success",
-                "cost_usd": total_cost,
-                "tokens_used": tokens_used,
-                "context_pct": context_pct,
-                "context_limit": context_limit,
-            }
-        except asyncio.CancelledError:
-            return await self._emit_run_interrupted(
-                turn,
-                run_id=run_id,
-                task_id=task_id,
-                agent=agent_name,
-                route_payload=route_payload,
-                summary="Interrupted by user",
-                cost_usd=total_cost,
-                tokens_used=tokens_used,
-                context_limit=context_limit,
-                context_pct=context_pct,
-            )
-        except Exception as exc:
-            logger.exception("Error processing run agent=%s", agent_name)
-            safe_msg = type(exc).__name__
-            await self.send(
-                {
-                    "type": "error",
-                    "message": f"Internal error: {safe_msg}",
-                    "agent": agent_name,
-                    **route_payload,
-                }
-            )
-            return await self._emit_run_failure(
-                turn,
-                run_id=run_id,
-                task_id=task_id,
-                agent=agent_name,
-                route_payload=route_payload,
-                error_type=safe_msg,
-                summary="Internal error during task execution",
-                context_limit=context_limit,
-            )
 
     # ------------------------------------------------------------------
     # dispatch_control_listener — ported from claw/api/chat.py lines 1059-1112
