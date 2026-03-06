@@ -32,6 +32,16 @@ from corvus.gateway.options import (
     ui_model_id,
 )
 from corvus.gateway.runtime import GatewayRuntime
+from corvus.gateway.session_emitter import (
+    SessionEmitter,
+    _PERSISTED_RUN_EVENT_TYPES,
+    _PERSISTED_SESSION_EVENT_TYPES,
+    _TRACE_EVENT_TYPES,
+    _optional_str,
+    _preview_summary,
+    _trace_source_app,
+    _trace_summary,
+)
 from corvus.gateway.task_planner import TaskRoute
 from corvus.gateway.workspace_runtime import prepare_agent_workspace
 from corvus.session import SessionTranscript
@@ -55,100 +65,18 @@ class TurnContext:
     requires_tools: bool
 
 
-# ---------------------------------------------------------------------------
-# Event type sets (copied verbatim from claw/api/chat.py lines 38-71)
-# ---------------------------------------------------------------------------
-
-_PERSISTED_SESSION_EVENT_TYPES = {
-    "dispatch_start",
-    "dispatch_plan",
-    "dispatch_complete",
-    "run_start",
-    "run_phase",
-    "run_output_chunk",
-    "run_complete",
-    "task_start",
-    "task_progress",
-    "task_complete",
-    "tool_start",
-    "tool_result",
-    "tool_permission_decision",
-    "confirm_request",
-    "confirm_response",
-    "interrupt_ack",
-}
-
-_PERSISTED_RUN_EVENT_TYPES = {
-    "run_start",
-    "run_phase",
-    "run_output_chunk",
-    "run_complete",
-    "tool_start",
-    "tool_result",
-    "tool_permission_decision",
-    "confirm_request",
-    "confirm_response",
-}
-
-_TRACE_EVENT_TYPES = _PERSISTED_SESSION_EVENT_TYPES | {
-    "routing",
-    "agent_status",
-    "error",
-}
-
-
-# ---------------------------------------------------------------------------
-# Module-level helpers (moved from claw/api/chat.py lines 88-131)
-# ---------------------------------------------------------------------------
-
-
-def _preview_summary(text: str, limit: int = 160) -> str:
-    compact = " ".join(text.split())
-    if len(compact) <= limit:
-        return compact
-    return compact[: limit - 1] + "\u2026"
-
-
-def _optional_str(value: object) -> str | None:
-    if isinstance(value, str):
-        trimmed = value.strip()
-        if trimmed:
-            return trimmed
-    return None
-
-
-def _trace_source_app(event_type: str, payload: dict) -> str:
-    if agent := _optional_str(payload.get("agent")):
-        return agent
-    if event_type in {"dispatch_start", "dispatch_plan", "dispatch_complete", "routing"}:
-        return "router"
-    return "gateway"
-
-
-def _trace_summary(event_type: str, payload: dict) -> str | None:
-    if summary := _optional_str(payload.get("summary")):
-        return _preview_summary(summary, limit=220)
-    if event_type == "run_output_chunk":
-        if content := _optional_str(payload.get("content")):
-            return _preview_summary(content, limit=220)
-        if payload.get("final") is True:
-            return "Final output marker"
-    if message := _optional_str(payload.get("message")):
-        return _preview_summary(message, limit=220)
-    if event_type == "tool_start":
-        if tool := _optional_str(payload.get("tool")):
-            return f"Tool start: {tool}"
-    if event_type == "tool_result":
-        status = _optional_str(payload.get("status")) or "success"
-        return f"Tool result ({status})"
-    if event_type == "tool_permission_decision":
-        state = _optional_str(payload.get("state")) or "deny"
-        tool = _optional_str(payload.get("tool")) or "tool"
-        return f"Permission {state}: {tool}"
-    if event_type == "confirm_request":
-        if tool := _optional_str(payload.get("tool")):
-            return f"Confirm request: {tool}"
-    return None
+# Re-export event type sets and helpers from session_emitter for backward compat.
+# These names are imported above; this comment documents why they're in this
+# module's namespace: existing tests and callers import them from chat_session.
+__all_reexports__ = [
+    "_PERSISTED_SESSION_EVENT_TYPES",
+    "_PERSISTED_RUN_EVENT_TYPES",
+    "_TRACE_EVENT_TYPES",
+    "_preview_summary",
+    "_optional_str",
+    "_trace_source_app",
+    "_trace_summary",
+]
 
 
 # ---------------------------------------------------------------------------
@@ -176,8 +104,6 @@ class ChatSession:
         self.websocket = websocket
         self.user = user
         self.session_id = session_id
-        self.send_lock = asyncio.Lock()
-        self.current_turn_id: str | None = None
         self._current_turn: TurnContext | None = None
         self.transcript = SessionTranscript(
             user=user,
@@ -186,138 +112,47 @@ class ChatSession:
         )
         self.confirm_queue = ConfirmQueue()
 
-    # ------------------------------------------------------------------
-    # Send sub-methods (decomposed from the monolithic _send closure)
-    # ------------------------------------------------------------------
+        # Create ws_send callable wrapping self.websocket.
+        # NOTE: The emitter's _ws_send already acquires send_lock before
+        # calling this, so no lock here to avoid deadlock.
+        async def _ws_send(payload: dict) -> None:
+            if self.websocket is not None:
+                await self.websocket.send_json(payload)
 
-    async def _ws_send(self, payload: dict) -> None:
-        """Send payload over WebSocket under lock."""
-        if self.websocket is None:
-            return
-        async with self.send_lock:
-            await self.websocket.send_json(payload)
-
-    def _persist_session_event(
-        self,
-        *,
-        event_type: str,
-        payload: dict,
-        turn_id: str | None,
-    ) -> None:
-        """Persist to session events table."""
-        try:
-            self.runtime.session_mgr.add_event(
-                session_id=self.session_id,
-                turn_id=turn_id or self.current_turn_id,
-                event_type=event_type,
-                payload=payload,
-            )
-        except Exception:
-            logger.exception(
-                "Failed to persist session event: session_id=%s type=%s",
-                self.session_id,
-                event_type,
-            )
-
-    def _persist_run_event(
-        self,
-        *,
-        run_id: str,
-        dispatch_id: str,
-        event_type: str,
-        payload: dict,
-        turn_id: str | None,
-    ) -> None:
-        """Persist to run events table."""
-        try:
-            self.runtime.session_mgr.add_run_event(
-                run_id,
-                dispatch_id=dispatch_id,
-                session_id=self.session_id,
-                turn_id=turn_id or self.current_turn_id,
-                event_type=event_type,
-                payload=payload,
-            )
-        except Exception:
-            logger.exception(
-                "Failed to persist run event: run_id=%s type=%s",
-                run_id,
-                event_type,
-            )
-
-    async def _publish_trace(
-        self,
-        *,
-        event_type: str,
-        payload: dict,
-        dispatch_id: str | None,
-        run_id: str | None,
-        turn_id: str | None,
-    ) -> None:
-        """Publish to TraceHub for live observability."""
-        trace_dispatch_id = dispatch_id or _optional_str(payload.get("dispatch_id"))
-        trace_run_id = run_id or _optional_str(payload.get("run_id"))
-        trace_turn_id = turn_id or self.current_turn_id or _optional_str(payload.get("turn_id"))
-        try:
-            trace_row = self.runtime.session_mgr.add_trace_event(
-                source_app=_trace_source_app(event_type, payload),
-                session_id=self.session_id,
-                dispatch_id=trace_dispatch_id,
-                run_id=trace_run_id,
-                turn_id=trace_turn_id,
-                hook_event_type=event_type,
-                payload=payload,
-                summary=_trace_summary(event_type, payload),
-                model_name=_optional_str(payload.get("model")),
-            )
-            await self.runtime.trace_hub.publish(user=self.user, event=trace_row)
-        except Exception:
-            logger.exception(
-                "Failed to persist/publish trace event: session_id=%s type=%s",
-                self.session_id,
-                event_type,
-            )
-
-    async def send(
-        self,
-        payload: dict,
-        *,
-        persist: bool = False,
-        run_id: str | None = None,
-        dispatch_id: str | None = None,
-        turn_id: str | None = None,
-    ) -> None:
-        """Orchestrate: ws_send + optional persist + optional trace."""
-        await self._ws_send(payload)
-        event_type = str(payload.get("type", ""))
-        if persist and event_type in _PERSISTED_SESSION_EVENT_TYPES:
-            self._persist_session_event(
-                event_type=event_type,
-                payload=payload,
-                turn_id=turn_id,
-            )
-        if run_id and dispatch_id and event_type in _PERSISTED_RUN_EVENT_TYPES and persist:
-            self._persist_run_event(
-                run_id=run_id,
-                dispatch_id=dispatch_id,
-                event_type=event_type,
-                payload=payload,
-                turn_id=turn_id,
-            )
-        should_trace = event_type in _TRACE_EVENT_TYPES and (
-            persist or event_type in {"routing", "agent_status", "error"}
+        self.emitter = SessionEmitter(
+            runtime=runtime,
+            ws_send=_ws_send if websocket is not None else None,
+            session_id=session_id,
+            user=user,
         )
-        if should_trace:
-            await self._publish_trace(
-                event_type=event_type,
-                payload=payload,
-                dispatch_id=dispatch_id,
-                run_id=run_id,
-                turn_id=turn_id,
-            )
+
+        # Shared lock — use the emitter's lock as the canonical one
+        self.send_lock = self.emitter.send_lock
+
+        # Delegate send/persist/trace/emit methods to the emitter
+        self.send = self.emitter.send  # type: ignore[assignment]
+        self._ws_send = self.emitter._ws_send  # type: ignore[assignment]
+        self._persist_session_event = self.emitter._persist_session_event  # type: ignore[assignment]
+        self._persist_run_event = self.emitter._persist_run_event  # type: ignore[assignment]
+        self._publish_trace = self.emitter._publish_trace  # type: ignore[assignment]
+        self._emit_phase = self.emitter.emit_phase  # type: ignore[assignment]
+        self._emit_run_failure = self.emitter.emit_run_failure  # type: ignore[assignment]
+        self._emit_run_interrupted = self.emitter.emit_run_interrupted  # type: ignore[assignment]
 
     # ------------------------------------------------------------------
-    # Payload builder and run failure helper
+    # current_turn_id — proxied to emitter for consistency
+    # ------------------------------------------------------------------
+
+    @property
+    def current_turn_id(self) -> str | None:
+        return self.emitter.current_turn_id
+
+    @current_turn_id.setter
+    def current_turn_id(self, value: str | None) -> None:
+        self.emitter.current_turn_id = value
+
+    # ------------------------------------------------------------------
+    # Payload builder (delegates to SessionEmitter.base_payload)
     # ------------------------------------------------------------------
 
     @staticmethod
@@ -331,212 +166,14 @@ class ChatSession:
         session_id: str,
     ) -> dict:
         """Build the common payload dict shared by all run events."""
-        return {
-            "dispatch_id": turn.dispatch_id,
-            "run_id": run_id,
-            "task_id": task_id,
-            "session_id": session_id,
-            "turn_id": turn.turn_id,
-            "agent": agent,
-            **route_payload,
-        }
-
-    async def _emit_phase(
-        self,
-        turn: TurnContext,
-        *,
-        run_id: str,
-        task_id: str,
-        agent: str,
-        route_payload: dict,
-        phase: str,
-        summary: str,
-    ) -> None:
-        """Emit run_phase + optional task_progress events."""
-        base = self._base_payload(
+        return SessionEmitter.base_payload(
             turn=turn,
             run_id=run_id,
             task_id=task_id,
             agent=agent,
             route_payload=route_payload,
-            session_id=self.session_id,
+            session_id=session_id,
         )
-        phase_status = "streaming" if phase == "executing" else "error" if phase == "error" else "thinking"
-        await self.send(
-            {"type": "run_phase", **base, "phase": phase, "summary": summary},
-            persist=True,
-            run_id=run_id,
-            dispatch_id=turn.dispatch_id,
-            turn_id=turn.turn_id,
-        )
-        if phase not in {"done", "error", "interrupted"}:
-            await self.send(
-                {
-                    "type": "task_progress",
-                    "task_id": task_id,
-                    "agent": agent,
-                    "status": phase_status,
-                    "summary": summary,
-                    "session_id": self.session_id,
-                    "turn_id": turn.turn_id,
-                    **route_payload,
-                },
-                persist=True,
-                run_id=run_id,
-                dispatch_id=turn.dispatch_id,
-                turn_id=turn.turn_id,
-            )
-
-    async def _emit_run_failure(
-        self,
-        turn: TurnContext,
-        *,
-        run_id: str,
-        task_id: str,
-        agent: str,
-        route_payload: dict,
-        error_type: str,
-        summary: str,
-        context_limit: int,
-    ) -> dict:
-        """Consolidated error exit: emit events, update run record, return error dict."""
-        base = self._base_payload(
-            turn=turn,
-            run_id=run_id,
-            task_id=task_id,
-            agent=agent,
-            route_payload=route_payload,
-            session_id=self.session_id,
-        )
-        await self._emit_phase(
-            turn,
-            run_id=run_id,
-            task_id=task_id,
-            agent=agent,
-            route_payload=route_payload,
-            phase="error",
-            summary=summary,
-        )
-        await self.send(
-            {
-                "type": "run_complete",
-                **base,
-                "result": "error",
-                "summary": summary,
-                "cost_usd": 0.0,
-                "tokens_used": 0,
-                "context_limit": context_limit,
-                "context_pct": 0.0,
-            },
-            persist=True,
-            run_id=run_id,
-            dispatch_id=turn.dispatch_id,
-            turn_id=turn.turn_id,
-        )
-        await self.send(
-            {
-                "type": "task_complete",
-                "task_id": task_id,
-                "agent": agent,
-                "result": "error",
-                "summary": summary,
-                "cost_usd": 0.0,
-                "session_id": self.session_id,
-                "turn_id": turn.turn_id,
-                **route_payload,
-            },
-            persist=True,
-            run_id=run_id,
-            dispatch_id=turn.dispatch_id,
-            turn_id=turn.turn_id,
-        )
-        self.runtime.session_mgr.update_agent_run(
-            run_id,
-            status="error",
-            summary=summary,
-            error=error_type,
-            completed_at=datetime.now(UTC),
-        )
-        return {"result": "error", "cost_usd": 0.0, "tokens_used": 0, "context_pct": 0.0}
-
-    async def _emit_run_interrupted(
-        self,
-        turn: TurnContext,
-        *,
-        run_id: str,
-        task_id: str,
-        agent: str,
-        route_payload: dict,
-        summary: str,
-        cost_usd: float,
-        tokens_used: int,
-        context_limit: int,
-        context_pct: float,
-    ) -> dict:
-        """Consolidated interrupted exit: emit events, update run record, return result dict."""
-        base = self._base_payload(
-            turn=turn,
-            run_id=run_id,
-            task_id=task_id,
-            agent=agent,
-            route_payload=route_payload,
-            session_id=self.session_id,
-        )
-        await self._emit_phase(
-            turn,
-            run_id=run_id,
-            task_id=task_id,
-            agent=agent,
-            route_payload=route_payload,
-            phase="interrupted",
-            summary=summary,
-        )
-        await self.send(
-            {
-                "type": "run_complete",
-                **base,
-                "result": "interrupted",
-                "summary": summary,
-                "cost_usd": cost_usd,
-                "tokens_used": tokens_used,
-                "context_limit": context_limit,
-                "context_pct": context_pct,
-            },
-            persist=True,
-            run_id=run_id,
-            dispatch_id=turn.dispatch_id,
-            turn_id=turn.turn_id,
-        )
-        await self.send(
-            {
-                "type": "task_complete",
-                "task_id": task_id,
-                "agent": agent,
-                "result": "interrupted",
-                "summary": summary,
-                "cost_usd": cost_usd,
-                "session_id": self.session_id,
-                "turn_id": turn.turn_id,
-                **route_payload,
-            },
-            persist=True,
-            run_id=run_id,
-            dispatch_id=turn.dispatch_id,
-            turn_id=turn.turn_id,
-        )
-        self.runtime.session_mgr.update_agent_run(
-            run_id,
-            status="interrupted",
-            summary=summary,
-            completed_at=datetime.now(UTC),
-        )
-        return {
-            "result": "interrupted",
-            "cost_usd": cost_usd,
-            "tokens_used": tokens_used,
-            "context_pct": context_pct,
-            "context_limit": context_limit,
-        }
 
     # ------------------------------------------------------------------
     # Route payload helper

@@ -26,6 +26,7 @@ from corvus.gateway.chat_session import (
     _trace_source_app,
     _trace_summary,
 )
+from corvus.gateway.session_emitter import SessionEmitter
 from corvus.gateway.task_planner import TaskRoute
 from corvus.gateway.trace_hub import TraceHub
 from corvus.session_manager import SessionManager
@@ -381,11 +382,14 @@ class TestBasePayload:
 
 
 class TestEmitPhaseAndFailureSignatures:
+    """After delegation, _emit_phase/_emit_run_failure are instance attrs
+    pointing to SessionEmitter methods. Check the emitter class signatures."""
+
     def test_emit_phase_is_async_method(self) -> None:
-        assert inspect.iscoroutinefunction(ChatSession._emit_phase)
+        assert inspect.iscoroutinefunction(SessionEmitter.emit_phase)
 
     def test_emit_phase_signature(self) -> None:
-        sig = inspect.signature(ChatSession._emit_phase)
+        sig = inspect.signature(SessionEmitter.emit_phase)
         params = list(sig.parameters.keys())
         assert "self" in params
         assert "turn" in params
@@ -397,10 +401,10 @@ class TestEmitPhaseAndFailureSignatures:
         assert "summary" in params
 
     def test_emit_run_failure_is_async_method(self) -> None:
-        assert inspect.iscoroutinefunction(ChatSession._emit_run_failure)
+        assert inspect.iscoroutinefunction(SessionEmitter.emit_run_failure)
 
     def test_emit_run_failure_signature(self) -> None:
-        sig = inspect.signature(ChatSession._emit_run_failure)
+        sig = inspect.signature(SessionEmitter.emit_run_failure)
         params = list(sig.parameters.keys())
         assert "self" in params
         assert "turn" in params
@@ -414,9 +418,21 @@ class TestEmitPhaseAndFailureSignatures:
 
     def test_emit_run_failure_returns_dict(self) -> None:
         """Return type annotation should indicate dict."""
-        sig = inspect.signature(ChatSession._emit_run_failure)
+        sig = inspect.signature(SessionEmitter.emit_run_failure)
         # With `from __future__ import annotations`, return_annotation is a string
         assert sig.return_annotation in (dict, "dict")
+
+    def test_chat_session_instance_has_emit_phase(self, tmp_path) -> None:
+        """After delegation, ChatSession instances expose _emit_phase."""
+        _, session = _make_session(tmp_path)
+        assert hasattr(session, "_emit_phase")
+        assert inspect.iscoroutinefunction(session._emit_phase)
+
+    def test_chat_session_instance_has_emit_run_failure(self, tmp_path) -> None:
+        """After delegation, ChatSession instances expose _emit_run_failure."""
+        _, session = _make_session(tmp_path)
+        assert hasattr(session, "_emit_run_failure")
+        assert inspect.iscoroutinefunction(session._emit_run_failure)
 
 
 # ---------------------------------------------------------------------------
@@ -425,11 +441,14 @@ class TestEmitPhaseAndFailureSignatures:
 
 
 class TestChatSessionSendSignature:
+    """After delegation, send/_ws_send/etc. are instance attrs pointing to
+    SessionEmitter methods. Check the emitter class and instance attrs."""
+
     def test_send_is_async_method(self) -> None:
-        assert inspect.iscoroutinefunction(ChatSession.send)
+        assert inspect.iscoroutinefunction(SessionEmitter.send)
 
     def test_send_signature(self) -> None:
-        sig = inspect.signature(ChatSession.send)
+        sig = inspect.signature(SessionEmitter.send)
         params = list(sig.parameters.keys())
         assert "self" in params
         assert "payload" in params
@@ -439,17 +458,23 @@ class TestChatSessionSendSignature:
         assert "turn_id" in params
 
     def test_ws_send_is_async_method(self) -> None:
-        assert inspect.iscoroutinefunction(ChatSession._ws_send)
+        assert inspect.iscoroutinefunction(SessionEmitter._ws_send)
 
     def test_persist_session_event_is_sync(self) -> None:
         """_persist_session_event is synchronous (SQLite writes are sync)."""
-        assert not inspect.iscoroutinefunction(ChatSession._persist_session_event)
+        assert not inspect.iscoroutinefunction(SessionEmitter._persist_session_event)
 
     def test_persist_run_event_is_sync(self) -> None:
-        assert not inspect.iscoroutinefunction(ChatSession._persist_run_event)
+        assert not inspect.iscoroutinefunction(SessionEmitter._persist_run_event)
 
     def test_publish_trace_is_async(self) -> None:
-        assert inspect.iscoroutinefunction(ChatSession._publish_trace)
+        assert inspect.iscoroutinefunction(SessionEmitter._publish_trace)
+
+    def test_chat_session_instance_has_send(self, tmp_path) -> None:
+        """After delegation, ChatSession instances expose send."""
+        _, session = _make_session(tmp_path)
+        assert hasattr(session, "send")
+        assert inspect.iscoroutinefunction(session.send)
 
 
 # ---------------------------------------------------------------------------
@@ -672,12 +697,15 @@ class TestEmitRunFailureBehavior:
 
 
 class TestEmitRunInterrupted:
+    """After delegation, _emit_run_interrupted lives on SessionEmitter as
+    emit_run_interrupted and is bound to ChatSession instances as _emit_run_interrupted."""
+
     def test_emit_run_interrupted_exists_and_is_async(self) -> None:
-        assert hasattr(ChatSession, "_emit_run_interrupted")
-        assert inspect.iscoroutinefunction(ChatSession._emit_run_interrupted)
+        assert hasattr(SessionEmitter, "emit_run_interrupted")
+        assert inspect.iscoroutinefunction(SessionEmitter.emit_run_interrupted)
 
     def test_emit_run_interrupted_signature(self) -> None:
-        sig = inspect.signature(ChatSession._emit_run_interrupted)
+        sig = inspect.signature(SessionEmitter.emit_run_interrupted)
         params = list(sig.parameters.keys())
         assert "self" in params
         for name in ("turn", "run_id", "task_id", "agent", "route_payload",
@@ -688,10 +716,16 @@ class TestEmitRunInterrupted:
             assert sig.parameters[name].kind == inspect.Parameter.KEYWORD_ONLY
 
     def test_emit_run_interrupted_returns_dict(self) -> None:
-        """Source-level check: method returns a dict with 'interrupted' result."""
-        source = Path(__file__).parent.parent.parent / "corvus" / "gateway" / "chat_session.py"
+        """Source-level check: session_emitter.py returns a dict with 'interrupted' result."""
+        source = Path(__file__).parent.parent.parent / "corvus" / "gateway" / "session_emitter.py"
         text = source.read_text()
         assert '"result": "interrupted"' in text
+
+    def test_chat_session_instance_has_emit_run_interrupted(self, tmp_path) -> None:
+        """After delegation, ChatSession instances expose _emit_run_interrupted."""
+        _, session = _make_session(tmp_path)
+        assert hasattr(session, "_emit_run_interrupted")
+        assert inspect.iscoroutinefunction(session._emit_run_interrupted)
 
 
 # ---------------------------------------------------------------------------
