@@ -58,6 +58,13 @@ def _require_session_mgr() -> SessionManager:
     return _session_mgr
 
 
+def _require_model_router() -> ModelRouter:
+    """Return the ModelRouter or fail fast if not configured."""
+    if _model_router is None:
+        raise HTTPException(status_code=503, detail="ModelRouter not initialized")
+    return _model_router
+
+
 def _require_service() -> AgentsService:
     if _service is None:
         raise HTTPException(
@@ -154,6 +161,24 @@ async def get_agent_policy(name: str, user: str = Depends(get_user)):
         return _require_service().get_agent_policy(name)
     except KeyError as exc:
         raise HTTPException(status_code=404, detail=f"Agent not found: {name}") from exc
+
+
+@router.get("/agents/{agent_name}/model-config")
+async def get_agent_model_config(
+    agent_name: str,
+    user: str = Depends(get_user),
+):
+    """Get model routing config for an agent."""
+    model_router = _require_model_router()
+    model = model_router.get_model(agent_name)
+    backend = model_router.get_backend(agent_name)
+    context_limit = model_router.get_context_limit(model)
+    return {
+        "agent": agent_name,
+        "model": model,
+        "backend": backend,
+        "context_limit": context_limit,
+    }
 
 
 @router.post("/agents")
