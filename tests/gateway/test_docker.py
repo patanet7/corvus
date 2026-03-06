@@ -59,6 +59,7 @@ class TestDockerfile:
         assert "corvus.server" in content
 
 
+@pytest.mark.skipif(not COMPOSE.exists(), reason=f"Infrastructure file not present: {COMPOSE}")
 class TestComposeYaml:
     """Tests for infra/stacks/laptop-server/claw/compose.yaml."""
 

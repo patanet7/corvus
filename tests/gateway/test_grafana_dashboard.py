@@ -128,6 +128,7 @@ def _panel_ids(dashboard: dict) -> list[int]:
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.skipif(not DASHBOARD_PATH.exists(), reason=f"Infrastructure file not present: {DASHBOARD_PATH}")
 class TestGrafanaDashboard:
     """Validate Claw Gateway Grafana dashboard completeness."""
 

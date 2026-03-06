@@ -17,6 +17,8 @@ import asyncio
 import json
 from pathlib import Path
 
+import pytest
+
 from corvus.events import EventEmitter, JSONLFileSink
 from corvus.hooks import create_hooks
 
@@ -717,6 +719,18 @@ class TestWSServerSourceContracts:
         assert "TODO(phase2)" in source
 
 
+SWAG_CONF = (
+    Path(__file__).parent.parent.parent
+    / "infra"
+    / "stacks"
+    / "optiplex"
+    / "swag"
+    / "proxy-confs"
+    / "claw.subdomain.conf"
+)
+
+
+@pytest.mark.skipif(not SWAG_CONF.exists(), reason=f"Infrastructure file not present: {SWAG_CONF}")
 class TestSWAGProxyContracts:
     """Fix 1.1: Verify SWAG proxy config has WebSocket upgrade headers."""
 
