@@ -29,11 +29,11 @@ agents:
     params:
       temperature: 0.2
   # Design doc specifies kimi-k2 for homelab, but using sonnet until
-  # the provider adapter layer (Slice 10B) adds non-Claude routing.
+  # LiteLLM proxy adds non-Claude routing.
   homelab:
     model: sonnet
   # Design doc specifies ollama/phi-3-mini for music, but using haiku
-  # until the Ollama provider adapter is wired.
+  # until LiteLLM handles Ollama routing.
   music:
     model: haiku
   home:
@@ -74,10 +74,12 @@ providers:
     api_base: https://api.moonshot.cn/v1
 
 # Backend definitions — how each model backend is reached.
+# LiteLLM handles routing for all backends; these definitions configure
+# how each backend appears in the generated litellm_config.yaml.
 # Types:
-#   sdk_native  — Direct Claude API via claude-agent-sdk (no extra config)
+#   sdk_native  — Direct Claude API (LiteLLM uses anthropic/ prefix)
 #   proxy       — HTTP proxy (KimiProxy) that translates requests
-#   env_swap    — Override env vars to point SDK at a different API (e.g. Ollama)
+#   env_swap    — Non-Claude API (e.g. Ollama, routed via LiteLLM)
 backends:
   claude:
     type: sdk_native
@@ -104,3 +106,13 @@ backends:
     type: openai
     # base_url from OPENAI_COMPAT_BASE_URL env var
     # api_key from OPENAI_COMPAT_API_KEY env var (optional)
+
+# LiteLLM proxy configuration — routing, retries, fallbacks.
+# These settings are translated into litellm_config.yaml at startup.
+litellm:
+  port: 4000
+  host: "127.0.0.1"
+  num_retries: 3
+  cooldown_time: 30
+  retry_after: 5
+  routing_strategy: "simple-shuffle"

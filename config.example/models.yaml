@@ -1,6 +1,6 @@
 # Per-agent model assignments and provider configuration.
 # SDK-native models: haiku, sonnet, opus (passed to AgentDefinition.model)
-# Non-Claude models: ollama/*, kimi-* (routed via provider adapters)
+# Non-Claude models: ollama/*, kimi-* (routed via LiteLLM proxy)
 
 defaults:
   model: sonnet
@@ -35,6 +35,10 @@ providers:
   ollama:
     api_base: ${OLLAMA_API_BASE:-http://localhost:11434}
 
+# Backend definitions — LiteLLM handles routing for all backends.
+# Types:
+#   sdk_native  — Direct Claude API (LiteLLM uses anthropic/ prefix)
+#   env_swap    — Non-Claude API (e.g. Ollama, routed via LiteLLM)
 backends:
   claude:
     type: sdk_native
@@ -45,3 +49,13 @@ backends:
     env:
       ANTHROPIC_AUTH_TOKEN: "ollama"
       ANTHROPIC_API_KEY: ""
+
+# LiteLLM proxy configuration — routing, retries, fallbacks.
+# These settings are translated into litellm_config.yaml at startup.
+litellm:
+  port: 4000
+  host: "127.0.0.1"
+  num_retries: 3
+  cooldown_time: 30
+  retry_after: 5
+  routing_strategy: "simple-shuffle"

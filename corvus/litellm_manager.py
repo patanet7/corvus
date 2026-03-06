@@ -118,13 +118,14 @@ def generate_litellm_config(models_yaml_path: Path) -> dict[str, Any]:
             },
         })
 
-    # Router settings
+    # Router settings — read from litellm: section with hardcoded fallbacks
+    litellm_cfg = config.get("litellm", {})
     router_settings: dict[str, Any] = {
-        "routing_strategy": "simple-shuffle",
-        "num_retries": 3,
-        "allowed_fails": 3,
-        "cooldown_time": 30,
-        "retry_after": 5,
+        "routing_strategy": litellm_cfg.get("routing_strategy", "simple-shuffle"),
+        "num_retries": litellm_cfg.get("num_retries", 3),
+        "allowed_fails": litellm_cfg.get("allowed_fails", 3),
+        "cooldown_time": litellm_cfg.get("cooldown_time", 30),
+        "retry_after": litellm_cfg.get("retry_after", 5),
     }
 
     # Build fallback chains from config
