@@ -55,7 +55,7 @@ mise run break-glass        # Start server in break-glass mode
 ```
 corvus/              — Python gateway package (FastAPI + WebSocket + agents)
 frontend/            — SvelteKit chat UI
-tests/               — Behavioral test suite (1711 passing, no mocks)
+tests/               — Behavioral test suite (1790+ passing, no mocks)
 scripts/             — CLI tools for agent domains (finance, paperless, etc.)
 config/              — Agent definitions, model routing, capabilities (deployment-specific)
 config.example/      — Example configs for new deployments
@@ -99,13 +99,14 @@ ARCHITECTURE.md      — Gateway architecture diagram + component docs
 
 ## Multi-Backend Model Routing
 
-**Corvus supports multiple LLM backends, not just Claude.** The `claude-agent-sdk` reads `ANTHROPIC_API_KEY` and `ANTHROPIC_BASE_URL` from environment variables. By overriding these before SDK calls, the system routes to any compatible backend:
+**Corvus uses LiteLLM proxy for model routing.** At startup, `LiteLLMManager` generates a `litellm_config.yaml` from `config/models.yaml` and starts a local proxy on `127.0.0.1:4000`. The `claude-agent-sdk` talks to this proxy via `ANTHROPIC_BASE_URL`.
 
-- **sdk_native** (Claude): Direct Anthropic API
-- **env_swap** (Ollama, OpenAI-compat): Override `ANTHROPIC_BASE_URL`
-- **proxy** (Kimi): Local proxy translating request formats
+- **Claude**: Direct Anthropic API via LiteLLM
+- **Ollama**: Routed by LiteLLM to local Ollama instance
+- **Kimi**: Routed through KimiProxy (`localhost:8100`) registered as LiteLLM backend
+- **OpenAI / Groq / etc.**: Add to `config/models.yaml` backends section
 
-**Config-driven values:** Context limits, model assignments, and backend configs live in `config/models.yaml`. Do NOT hardcode these values.
+LiteLLM handles fallbacks, retries, cooldowns, and cost tracking. `config/models.yaml` is the single source of truth.
 
 ## Design Principles
 - Default-deny tooling; deny wins over allow
