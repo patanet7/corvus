@@ -14,11 +14,15 @@ import asyncio
 import logging
 import sys
 import uuid
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from prompt_toolkit.key_binding import KeyBindings
 
 logger = logging.getLogger("corvus-cli")
 
 
-def _create_keybindings() -> "KeyBindings":
+def _create_keybindings() -> KeyBindings:
     """Create key bindings with Escape to interrupt."""
     from prompt_toolkit.key_binding import KeyBindings
 
@@ -275,7 +279,7 @@ async def _repl(runtime: object, args: argparse.Namespace) -> None:
             continue
 
         try:
-            response = await client.query(user_input)
+            await client.query(user_input)
             async for msg in client.receive_response():
                 msg_type = getattr(msg, "type", None) or type(msg).__name__
                 if msg_type in ("text", "AssistantMessage"):
