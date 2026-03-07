@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { isValidAgentName, type AgentInfo, type AgentName } from '$lib/types';
+	import { isValidAgentName, type AgentInfo } from '$lib/types';
 	import type { AgentProfile } from '$lib/api/agents';
 	import AgentPortrait from './AgentPortrait.svelte';
 
@@ -15,7 +15,7 @@
 		return typeof value === 'string' && value.trim().length > 0 ? value : 'Professional and concise';
 	});
 
-	const portraitAgent = $derived.by<AgentName>(() => (isValidAgentName(agent.id) ? agent.id : 'general'));
+	const portraitAgent = $derived(isValidAgentName(agent.id) ? agent.id : 'general');
 </script>
 
 <section class="rounded border border-border-muted bg-surface p-3">

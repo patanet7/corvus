@@ -1,7 +1,6 @@
 <script lang="ts">
 	import type {
 		ChatMessage,
-		AgentName,
 		AgentStatus,
 		ConfirmRequest,
 		ConnectionStatus,
@@ -21,7 +20,7 @@
 
 	interface Props {
 		messages: ChatMessage[];
-		activeAgent: AgentName | null;
+		activeAgent: string | null;
 		agentStatus: AgentStatus;
 		connectionStatus: ConnectionStatus;
 		sessionName: string;
@@ -31,7 +30,7 @@
 		contextPct: number;
 		modelModeLabel: string;
 		availableAgents: AgentInfo[];
-		pinnedAgent: AgentName | null;
+		pinnedAgent: string | null;
 		dispatchMode: DispatchMode;
 		selectedRecipients: string[];
 		sendToAllRecipients: boolean;
@@ -113,6 +112,7 @@
 		onRetryTranscript={onRetryTranscript}
 		{runtimeTask}
 		onOpenToolTrace={onOpenToolTrace}
+		{availableAgents}
 	/>
 
 	<ChatComposer

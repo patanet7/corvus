@@ -1,4 +1,3 @@
-import type { AgentName } from '$lib/types';
 import type { PortraitConfig, SvgPathDef } from './types';
 
 function svgAsset(
@@ -30,7 +29,7 @@ function svgAsset(
  * Reproduces the Phase 1 rendering: bg filled at 0.2, bg stroked, fg filled at 0.8.
  */
 function svgPortrait(
-	agent: AgentName,
+	agent: string,
 	viewBox: string,
 	bgPath: string,
 	fgPath: string
@@ -53,7 +52,7 @@ function svgPortrait(
 }
 
 /** Default geometric SVG portraits for all built-in agents. */
-export const DEFAULT_PORTRAITS: Record<AgentName, PortraitConfig> = {
+export const DEFAULT_PORTRAITS: Record<string, PortraitConfig> = {
 	personal: svgPortrait(
 		'personal',
 		'0 0 48 48',

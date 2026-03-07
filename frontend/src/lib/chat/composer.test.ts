@@ -1,12 +1,11 @@
 import { describe, expect, it } from 'vitest';
 
-import type { AgentName } from '$lib/types';
 import { parseAgentMention, parseSlashCommand } from './composer';
 
-const knownAgents = new Set<AgentName>(['work', 'homelab', 'general', 'huginn', 'home']);
+const knownAgents = new Set(['work', 'homelab', 'general', 'huginn', 'home']);
 
-function isKnownAgent(name: string): name is AgentName {
-	return knownAgents.has(name as AgentName);
+function isKnownAgent(name: string): boolean {
+	return knownAgents.has(name);
 }
 
 describe('parseAgentMention', () => {

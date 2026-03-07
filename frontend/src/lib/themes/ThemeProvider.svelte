@@ -1,6 +1,5 @@
 <script lang="ts">
 	import { setContext } from 'svelte';
-	import { AGENT_NAMES } from '$lib/types';
 	import type { ThemeConfig } from './types';
 	import { getTheme, DEFAULT_THEME_ID } from './registry';
 	import { THEME_KEY, type ThemeContext } from './context';
@@ -79,9 +78,9 @@
 		root.style.setProperty('--color-focus', t.colors.focus);
 		root.style.setProperty('--color-user-message-bg', t.components.chatPanel.userMessageBg);
 
-		// Agent colors
-		for (const name of AGENT_NAMES) {
-			root.style.setProperty(`--color-agent-${name}`, t.colors.agents[name]);
+		// Agent colors — iterate keys from theme config (not hardcoded list)
+		for (const [name, color] of Object.entries(t.colors.agents)) {
+			root.style.setProperty(`--color-agent-${name}`, color);
 		}
 
 		// Fonts

@@ -1,5 +1,3 @@
-import type { AgentName } from '$lib/types';
-
 /** A single SVG path element with optional styling attributes */
 export interface SvgPathDef {
 	d: string;
@@ -26,7 +24,7 @@ export type AssetDef =
 
 /** Portrait configuration for a single agent */
 export interface PortraitConfig {
-	agent: AgentName;
+	agent: string;
 	states: {
 		idle: AssetDef;
 		thinking?: AssetDef;

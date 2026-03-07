@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import {
-	AGENT_NAMES,
+	WELL_KNOWN_AGENTS,
 	isValidAgentName
 } from './types';
 import type {
@@ -19,59 +19,59 @@ import type {
 	AgentName
 } from './types';
 
-describe('AGENT_NAMES constant', () => {
+describe('WELL_KNOWN_AGENTS constant', () => {
 	it('contains exactly 10 entries', () => {
-		expect(AGENT_NAMES).toHaveLength(10);
+		expect(WELL_KNOWN_AGENTS).toHaveLength(10);
 	});
 
 	it('contains personal', () => {
-		expect(AGENT_NAMES).toContain('personal');
+		expect(WELL_KNOWN_AGENTS).toContain('personal');
 	});
 
 	it('contains work', () => {
-		expect(AGENT_NAMES).toContain('work');
+		expect(WELL_KNOWN_AGENTS).toContain('work');
 	});
 
 	it('contains homelab', () => {
-		expect(AGENT_NAMES).toContain('homelab');
+		expect(WELL_KNOWN_AGENTS).toContain('homelab');
 	});
 
 	it('contains finance', () => {
-		expect(AGENT_NAMES).toContain('finance');
+		expect(WELL_KNOWN_AGENTS).toContain('finance');
 	});
 
 	it('contains email', () => {
-		expect(AGENT_NAMES).toContain('email');
+		expect(WELL_KNOWN_AGENTS).toContain('email');
 	});
 
 	it('contains docs', () => {
-		expect(AGENT_NAMES).toContain('docs');
+		expect(WELL_KNOWN_AGENTS).toContain('docs');
 	});
 
 	it('contains music', () => {
-		expect(AGENT_NAMES).toContain('music');
+		expect(WELL_KNOWN_AGENTS).toContain('music');
 	});
 
 	it('contains home', () => {
-		expect(AGENT_NAMES).toContain('home');
+		expect(WELL_KNOWN_AGENTS).toContain('home');
 	});
 
 	it('contains huginn', () => {
-		expect(AGENT_NAMES).toContain('huginn');
+		expect(WELL_KNOWN_AGENTS).toContain('huginn');
 	});
 
 	it('contains general', () => {
-		expect(AGENT_NAMES).toContain('general');
+		expect(WELL_KNOWN_AGENTS).toContain('general');
 	});
 
 	it('is an array', () => {
-		expect(Array.isArray(AGENT_NAMES)).toBe(true);
+		expect(Array.isArray(WELL_KNOWN_AGENTS)).toBe(true);
 	});
 });
 
 describe('isValidAgentName', () => {
-	it('returns true for every entry in AGENT_NAMES', () => {
-		for (const name of AGENT_NAMES) {
+	it('returns true for every entry in WELL_KNOWN_AGENTS (format validation)', () => {
+		for (const name of WELL_KNOWN_AGENTS) {
 			expect(isValidAgentName(name)).toBe(true);
 		}
 	});
@@ -80,8 +80,9 @@ describe('isValidAgentName', () => {
 		expect(isValidAgentName('')).toBe(false);
 	});
 
-	it('returns false for unknown agent name', () => {
-		expect(isValidAgentName('unknown')).toBe(false);
+	it('accepts valid lowercase names in format-only mode', () => {
+		expect(isValidAgentName('custom-agent')).toBe(true);
+		expect(isValidAgentName('my_agent_2')).toBe(true);
 	});
 
 	it('returns false for uppercase variant', () => {
@@ -100,13 +101,14 @@ describe('isValidAgentName', () => {
 		expect(isValidAgentName(' homelab')).toBe(false);
 	});
 
-	it('returns false for numeric string', () => {
+	it('returns false for numeric-leading string', () => {
 		expect(isValidAgentName('123')).toBe(false);
 	});
 
-	it('returns false for null-like strings', () => {
-		expect(isValidAgentName('null')).toBe(false);
-		expect(isValidAgentName('undefined')).toBe(false);
+	it('validates against knownAgents when provided', () => {
+		const agents = [{ id: 'homelab', label: 'Homelab' }, { id: 'work', label: 'Work' }];
+		expect(isValidAgentName('homelab', agents)).toBe(true);
+		expect(isValidAgentName('unknown', agents)).toBe(false);
 	});
 });
 

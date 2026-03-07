@@ -1,8 +1,6 @@
 <script lang="ts">
-	import type { AgentName } from '$lib/types';
-
 	interface Props {
-		agent: AgentName;
+		agent: string;
 		model?: string | null;
 		size?: 'sm' | 'md';
 	}

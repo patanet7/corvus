@@ -3,7 +3,6 @@ import type {
 	ConnectionStatus,
 	AgentStatus,
 	Session,
-	AgentName,
 	Task,
 	ToolCall,
 	ConfirmRequest,
@@ -37,7 +36,7 @@ export const currentSession = $state<{
 	id: string | null;
 	name: string;
 	messages: ChatMessage[];
-	activeAgent: AgentName | null;
+	activeAgent: string | null;
 	agentStatus: AgentStatus;
 	selectedModel: string;
 	costUsd: number;

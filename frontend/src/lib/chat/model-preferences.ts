@@ -1,8 +1,6 @@
-import type { AgentName } from '$lib/types';
-
 const STORAGE_KEY = 'corvus.chat.model-preferences.v1';
 
-export type ModelPreferences = Partial<Record<AgentName, string>>;
+export type ModelPreferences = Record<string, string>;
 
 export function loadModelPreferences(): ModelPreferences {
 	if (typeof localStorage === 'undefined') return {};
@@ -14,7 +12,7 @@ export function loadModelPreferences(): ModelPreferences {
 		const prefs: ModelPreferences = {};
 		for (const [key, value] of Object.entries(parsed)) {
 			if (typeof value === 'string' && value.trim()) {
-				prefs[key as AgentName] = value;
+				prefs[key] = value;
 			}
 		}
 		return prefs;
@@ -29,7 +27,7 @@ export function saveModelPreferences(prefs: ModelPreferences): void {
 }
 
 export function preferredModelForAgent(
-	agent: AgentName | null | undefined,
+	agent: string | null | undefined,
 	prefs: ModelPreferences
 ): string | null {
 	if (!agent) return null;

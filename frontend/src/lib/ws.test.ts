@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import type { ServerMessage, ClientMessage } from './types';
-import { AGENT_NAMES, isValidAgentName } from './types';
+import { WELL_KNOWN_AGENTS, isValidAgentName } from './types';
 import { GatewayClient } from './ws';
 
 describe('Protocol types', () => {
@@ -241,18 +241,18 @@ describe('Protocol types', () => {
 });
 
 describe('Agent constants', () => {
-	it('AGENT_NAMES has all 10 agents', () => {
-		expect(AGENT_NAMES).toHaveLength(10);
-		expect(AGENT_NAMES).toContain('personal');
-		expect(AGENT_NAMES).toContain('work');
-		expect(AGENT_NAMES).toContain('homelab');
-		expect(AGENT_NAMES).toContain('finance');
-		expect(AGENT_NAMES).toContain('email');
-		expect(AGENT_NAMES).toContain('docs');
-		expect(AGENT_NAMES).toContain('music');
-		expect(AGENT_NAMES).toContain('home');
-		expect(AGENT_NAMES).toContain('huginn');
-		expect(AGENT_NAMES).toContain('general');
+	it('WELL_KNOWN_AGENTS has all 10 agents', () => {
+		expect(WELL_KNOWN_AGENTS).toHaveLength(10);
+		expect(WELL_KNOWN_AGENTS).toContain('personal');
+		expect(WELL_KNOWN_AGENTS).toContain('work');
+		expect(WELL_KNOWN_AGENTS).toContain('homelab');
+		expect(WELL_KNOWN_AGENTS).toContain('finance');
+		expect(WELL_KNOWN_AGENTS).toContain('email');
+		expect(WELL_KNOWN_AGENTS).toContain('docs');
+		expect(WELL_KNOWN_AGENTS).toContain('music');
+		expect(WELL_KNOWN_AGENTS).toContain('home');
+		expect(WELL_KNOWN_AGENTS).toContain('huginn');
+		expect(WELL_KNOWN_AGENTS).toContain('general');
 	});
 });
 
@@ -264,9 +264,9 @@ describe('isValidAgentName', () => {
 	});
 
 	it('returns false for invalid agent names', () => {
-		expect(isValidAgentName('unknown')).toBe(false);
 		expect(isValidAgentName('')).toBe(false);
 		expect(isValidAgentName('HOMELAB')).toBe(false);
+		expect(isValidAgentName('123bad')).toBe(false);
 	});
 });
 

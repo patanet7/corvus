@@ -1,12 +1,12 @@
 <script lang="ts">
-	import type { ConnectionStatus, AgentName } from '$lib/types';
+	import type { ConnectionStatus } from '$lib/types';
 	import { getThemeContext } from '$lib/themes/context';
 	import AgentPortrait from './AgentPortrait.svelte';
 	import AgentIdentityChip from './AgentIdentityChip.svelte';
 
 	interface Props {
 		connectionStatus: ConnectionStatus;
-		activeAgent: AgentName | null;
+		activeAgent: string | null;
 		sessionName: string;
 		costUsd: number;
 		tokensUsed: number;

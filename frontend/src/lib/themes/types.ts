@@ -1,5 +1,3 @@
-import type { AgentName } from '$lib/types';
-
 export interface FontDef {
 	family: string;
 	weights: number[];
@@ -32,7 +30,7 @@ export interface ThemeConfig {
 		error: string;
 		info: string;
 		focus: string;
-		agents: Record<AgentName, string>;
+		agents: Record<string, string>;
 	};
 
 	fonts: {

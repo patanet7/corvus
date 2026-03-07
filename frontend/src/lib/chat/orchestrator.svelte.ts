@@ -22,7 +22,6 @@ import {
 } from '$lib/api/sessions';
 import { RunOutputOrderer, type RunOutputChunk } from '$lib/chat/run-output-order';
 import type {
-	AgentName,
 	AgentStatus,
 	ChatMessage,
 	ChatRuntimeEvent,
@@ -52,14 +51,14 @@ export type AppMode = 'chat' | 'agents' | 'tasks' | 'timeline' | 'memory' | 'con
 export type ModelSelectionMode = 'preferred' | 'manual';
 
 export const chatUiState = $state<{
-	lastRoutedAgent: AgentName | null;
+	lastRoutedAgent: string | null;
 	lastRoutedModel: string | null;
 	modelSelectionMode: ModelSelectionMode;
-	pinnedAgent: AgentName | null;
+	pinnedAgent: string | null;
 	dispatchMode: DispatchMode;
 	selectedRecipients: string[];
 	sendToAllRecipients: boolean;
-	modelPreferences: Partial<Record<AgentName, string>>;
+	modelPreferences: Record<string, string>;
 	history: ReturnType<typeof createSessionHistoryState>;
 }>({
 	lastRoutedAgent: null,
@@ -90,13 +89,13 @@ function ensureModelPreferencesLoaded(): void {
 	modelPreferencesLoaded = true;
 }
 
-function updateModelPreference(agent: AgentName, modelId: string): void {
+function updateModelPreference(agent: string, modelId: string): void {
 	ensureModelPreferencesLoaded();
 	chatUiState.modelPreferences[agent] = modelId;
 	saveModelPreferences(chatUiState.modelPreferences);
 }
 
-function applyPinnedAgentPreference(agent: AgentName): void {
+function applyPinnedAgentPreference(agent: string): void {
 	ensureModelPreferencesLoaded();
 	const preferred = preferredModelForAgent(agent, chatUiState.modelPreferences);
 	if (!preferred) return;
@@ -104,7 +103,7 @@ function applyPinnedAgentPreference(agent: AgentName): void {
 	currentSession.selectedModel = preferred;
 }
 
-function isKnownEnabledAgent(name: string): name is AgentName {
+function isKnownEnabledAgent(name: string): boolean {
 	if (!isValidAgentName(name)) return false;
 	if (agentStore.agents.length === 0) return true;
 	return agentStore.agents.some((agent) => agent.id === name);
@@ -389,7 +388,7 @@ function handleSlashCommand(raw: string): boolean {
 	}
 }
 
-function findLatestTaskForAgent(agent: AgentName | null): Task | null {
+function findLatestTaskForAgent(agent: string | null): Task | null {
 	if (!agent) return null;
 	const candidates = Array.from(taskStore.tasks.values())
 		.filter((task) => task.agent === agent && task.status !== 'done' && task.result === undefined)
@@ -400,7 +399,7 @@ function findLatestTaskForAgent(agent: AgentName | null): Task | null {
 function logEventToLatestTask(
 	kind: TaskEvent['kind'],
 	text: string,
-	agent: AgentName | null,
+	agent: string | null,
 	callId?: string
 ): void {
 	const task = findLatestTaskForAgent(agent);
@@ -474,13 +473,13 @@ function asNumber(value: unknown): number | null {
 	return typeof value === 'number' && Number.isFinite(value) ? value : null;
 }
 
-function resolveEventAgent(payload: Record<string, unknown>): AgentName | null {
+function resolveEventAgent(payload: Record<string, unknown>): string | null {
 	const raw = asString(payload.agent);
 	return raw && isValidAgentName(raw) ? raw : null;
 }
 
 function findNearestAssistantMessageForEvent(
-	agent: AgentName | null,
+	agent: string | null,
 	timestamp: Date
 ): ChatMessage | null {
 	const assistants = currentSession.messages.filter(
@@ -605,7 +604,7 @@ function hydrateTaskStateFromEvents(events: SessionEvent[]): void {
 		const runId = asString(payload['run_id']) ?? asString(payload['runId']);
 		if (!taskId) continue;
 		const maybeAgent = asString(payload.agent);
-		const agent: AgentName = maybeAgent && isValidAgentName(maybeAgent) ? maybeAgent : 'general';
+		const agent = maybeAgent && isValidAgentName(maybeAgent) ? maybeAgent : 'general';
 
 		if (event.eventType === 'task_start' || event.eventType === 'run_start') {
 			if (!taskStore.tasks.has(taskId)) {
@@ -876,7 +875,7 @@ function appendRuntimeEventToMessage(
 }
 
 function getOrCreateAssistantMessage(
-	agentOverride?: AgentName | null,
+	agentOverride?: string | null,
 	modelOverride?: string
 ): ChatMessage {
 	const msgs = currentSession.messages;
@@ -903,7 +902,7 @@ function getOrCreateAssistantMessage(
 
 function appendRuntimeEventToAssistantMessage(
 	event: Omit<ChatRuntimeEvent, 'id'> & {
-		agent?: AgentName | null;
+		agent?: string | null;
 		model?: string;
 	}
 ): void {
@@ -1452,7 +1451,7 @@ export function sendMessage(rawMessage: string): void {
 			dispatchMode = 'parallel';
 		} else if (chatUiState.selectedRecipients.length > 0) {
 			if (chatUiState.selectedRecipients.length === 1 && dispatchMode !== 'parallel') {
-				targetAgent = chatUiState.selectedRecipients[0] as AgentName;
+				targetAgent = chatUiState.selectedRecipients[0] as string;
 				if (dispatchMode === 'router') {
 					dispatchMode = 'direct';
 				}
@@ -1476,7 +1475,7 @@ export function sendMessage(rawMessage: string): void {
 		modelOverride = currentSession.selectedModel;
 	} else {
 		const preferredForAgent = preferredModelForAgent(
-			(targetAgent ?? (targetAgents?.[0] as AgentName | undefined) ?? null),
+			(targetAgent ?? (targetAgents?.[0] as string | undefined) ?? null),
 			chatUiState.modelPreferences
 		);
 		if (preferredForAgent) {

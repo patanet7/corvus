@@ -1,5 +1,5 @@
 <script lang="ts">
-	import type { AgentName, AgentStatus } from '$lib/types';
+	import type { AgentStatus } from '$lib/types';
 	import type { AssetDef } from '$lib/portraits/types';
 	import { getPortrait } from '$lib/portraits/registry';
 	import { getThemeContext } from '$lib/themes/context';
@@ -9,7 +9,7 @@
 	import AnimatedRenderer from '$lib/portraits/renderers/AnimatedRenderer.svelte';
 
 	interface Props {
-		agent: AgentName;
+		agent: string;
 		status?: AgentStatus;
 		size?: 'sm' | 'md' | 'lg';
 	}

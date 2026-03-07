@@ -212,7 +212,8 @@ export type AgentStatus = 'idle' | 'thinking' | 'streaming' | 'done' | 'error';
 
 export type ConnectionStatus = 'connected' | 'connecting' | 'disconnected' | 'error';
 
-export const AGENT_NAMES = [
+/** Well-known agent names for built-in defaults. Backend is the source of truth. */
+export const WELL_KNOWN_AGENTS = [
 	'personal',
 	'work',
 	'homelab',
@@ -225,10 +226,13 @@ export const AGENT_NAMES = [
 	'general'
 ] as const;
 
-export type AgentName = (typeof AGENT_NAMES)[number];
+export type AgentName = string;
 
-export function isValidAgentName(name: string): name is AgentName {
-	return (AGENT_NAMES as readonly string[]).includes(name);
+/** Validate agent name against optional live agent list, or by format. */
+export function isValidAgentName(name: string, knownAgents?: AgentInfo[]): boolean {
+	if (!name) return false;
+	if (knownAgents) return knownAgents.some((a) => a.id === name);
+	return /^[a-z][a-z0-9_-]*$/.test(name);
 }
 
 export interface ChatMessage {

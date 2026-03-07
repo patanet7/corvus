@@ -1,8 +1,8 @@
 <script lang="ts">
 	import { tick } from 'svelte';
 	import { CHAT_VISIBLE_WINDOW, nextVisibleCount } from '$lib/chat/visible-window';
-	import type { AgentStatus, ChatMessage, ConnectionStatus, Task } from '$lib/types';
-	import { AGENT_NAMES } from '$lib/types';
+	import type { AgentInfo, AgentStatus, ChatMessage, ConnectionStatus, Task } from '$lib/types';
+	import { WELL_KNOWN_AGENTS } from '$lib/types';
 	import { getThemeContext } from '$lib/themes/context';
 	import AgentIdentityChip from './AgentIdentityChip.svelte';
 	import AgentPortrait from './AgentPortrait.svelte';
@@ -24,6 +24,7 @@
 		onRetryTranscript?: () => void;
 		runtimeTask?: Task | null;
 		onOpenToolTrace?: (callId: string) => void;
+		availableAgents?: AgentInfo[];
 	}
 
 	let {
@@ -36,8 +37,15 @@
 		transcriptError = null,
 		onRetryTranscript,
 		runtimeTask = null,
-		onOpenToolTrace
+		onOpenToolTrace,
+		availableAgents = []
 	}: Props = $props();
+
+	const welcomeAgents = $derived(
+		availableAgents.length > 0
+			? availableAgents.filter((a) => a.id !== 'general')
+			: WELL_KNOWN_AGENTS.filter((n) => n !== 'general').map((n) => ({ id: n, label: n, description: undefined } as AgentInfo))
+	);
 	const themeCtx = getThemeContext();
 	const chatMaxWidth = $derived(themeCtx.theme.components.chatPanel.maxWidth);
 	const messagePadding = $derived(themeCtx.theme.components.chatPanel.messagePadding);
@@ -154,10 +162,10 @@
 					Your messages are automatically routed to the right agent. Just start typing.
 				</p>
 				<div class="welcome-agent-grid">
-					{#each AGENT_NAMES.filter((n) => n !== 'general') as name}
+					{#each welcomeAgents as agent (agent.id)}
 						<div class="welcome-agent-card">
-							<AgentPortrait agent={name} size="sm" />
-							<span class="welcome-agent-label">{name}</span>
+							<AgentPortrait agent={agent.id} size="sm" />
+							<span class="welcome-agent-label">{agent.label || agent.id}</span>
 						</div>
 					{/each}
 				</div>

@@ -1,5 +1,5 @@
 import type { AgentInfo, ModelInfo } from '$lib/types';
-import { AGENT_NAMES } from '$lib/types';
+import { WELL_KNOWN_AGENTS } from '$lib/types';
 
 export function modelModeLabelForSelection(
 	mode: 'preferred' | 'manual',
@@ -16,5 +16,5 @@ export function agentSuggestionSource(availableAgents: AgentInfo[]): string[] {
 	if (availableAgents.length > 0) {
 		return availableAgents.map((a) => a.id);
 	}
-	return [...AGENT_NAMES];
+	return [...WELL_KNOWN_AGENTS];
 }

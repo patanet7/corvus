@@ -1,6 +1,7 @@
 import type { ChatMessage, Session, SessionEvent } from '$lib/types';
 import { isValidAgentName } from '$lib/types';
 
+
 interface ApiSession {
 	id: string;
 	user: string;

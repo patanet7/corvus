@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import type { ThemeConfig, FontDef } from './types';
-import { AGENT_NAMES } from '$lib/types';
+import { WELL_KNOWN_AGENTS } from '$lib/types';
 import { opsCockpit } from './themes/ops-cockpit';
 import { retroTerminal } from './themes/retro-terminal';
 import { darkFantasy } from './themes/dark-fantasy';
@@ -59,7 +59,7 @@ describe('ThemeConfig type definitions', () => {
 
 	it('ThemeConfig colors.agents covers all AgentName values', () => {
 		const theme = createMinimalTheme();
-		for (const name of AGENT_NAMES) {
+		for (const name of WELL_KNOWN_AGENTS) {
 			expect(theme.colors.agents[name]).toBeDefined();
 			expect(typeof theme.colors.agents[name]).toBe('string');
 		}
@@ -160,7 +160,7 @@ describe('Ops Cockpit theme', () => {
 		});
 
 	it('covers all agent names', () => {
-		for (const name of AGENT_NAMES) {
+		for (const name of WELL_KNOWN_AGENTS) {
 			expect(opsCockpit.colors.agents[name]).toBeDefined();
 		}
 	});
@@ -248,7 +248,7 @@ describe('Retro Terminal theme', () => {
 	});
 
 	it('covers all agent names', () => {
-		for (const name of AGENT_NAMES) {
+		for (const name of WELL_KNOWN_AGENTS) {
 			expect(retroTerminal.colors.agents[name]).toBeDefined();
 		}
 	});
@@ -361,7 +361,7 @@ describe('Dark Fantasy theme', () => {
 	});
 
 	it('covers all agent names', () => {
-		for (const name of AGENT_NAMES) {
+		for (const name of WELL_KNOWN_AGENTS) {
 			expect(darkFantasy.colors.agents[name]).toBeDefined();
 		}
 	});

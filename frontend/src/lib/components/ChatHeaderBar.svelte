@@ -1,15 +1,15 @@
 <script lang="ts">
-	import type { AgentName, AgentStatus, ModelInfo, AgentInfo } from '$lib/types';
+	import type { AgentStatus, ModelInfo, AgentInfo } from '$lib/types';
 	import AgentPortrait from './AgentPortrait.svelte';
 	import AgentIdentityChip from './AgentIdentityChip.svelte';
 	import AgentSpecialtyAccess from './AgentSpecialtyAccess.svelte';
 	import LlmRuntimeStrip from './LlmRuntimeStrip.svelte';
 
 	interface Props {
-		activeAgent: AgentName | null;
+		activeAgent: string | null;
 		agentStatus: AgentStatus;
 		sessionName: string;
-		pinnedAgent: AgentName | null;
+		pinnedAgent: string | null;
 		activeAgentInfo: AgentInfo | null;
 		selectedModel: string;
 		models: ModelInfo[];

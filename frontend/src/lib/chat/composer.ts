@@ -1,8 +1,6 @@
-import type { AgentName } from '$lib/types';
-
 export interface AgentMentionParseResult {
 	message: string;
-	targetAgent?: AgentName;
+	targetAgent?: string;
 	targetAgents?: string[];
 }
 
@@ -14,7 +12,7 @@ export interface SlashCommand {
 
 export function parseAgentMention(
 	input: string,
-	isKnownAgent: (name: string) => name is AgentName
+	isKnownAgent: (name: string) => boolean
 ): AgentMentionParseResult {
 	const leftTrimmed = input.trimStart();
 
