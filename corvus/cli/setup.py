@@ -9,6 +9,7 @@ from pathlib import Path
 
 from textual.app import App
 
+from corvus.auth.profiles import ApiKeyCredential, AuthProfileStore, TokenCredential
 from corvus.cli.screens.dashboard import DashboardScreen
 from corvus.cli.screens.passphrase import PassphraseScreen
 from corvus.cli.screens.welcome import WelcomeScreen
@@ -83,7 +84,13 @@ class CorvusSetupApp(App):
             self.push_screen("welcome")
 
     def _push_dashboard(self) -> None:
-        dashboard = DashboardScreen(credential_data=self._credential_data)
+        auth_profiles = AuthProfileStore()
+        if self._store is not None:
+            auth_profiles = self._store.get_auth_profiles()
+        dashboard = DashboardScreen(
+            credential_data=self._credential_data,
+            auth_profiles=auth_profiles,
+        )
         self.install_screen(dashboard, name="dashboard")
         self.install_screen(PassphraseScreen(), name="passphrase")
         self.push_screen("dashboard")
@@ -104,6 +111,27 @@ class CorvusSetupApp(App):
     ) -> None:
         """Save credentials for a provider to the SOPS store."""
         store = self._get_or_create_store()
+
+        # Create auth profile
+        profiles = store.get_auth_profiles()
+        profile_id = f"{store_key}:default"
+        if "setup_token" in data and data["setup_token"]:
+            profiles.profiles[profile_id] = TokenCredential(
+                provider=store_key, token=data["setup_token"]
+            )
+        elif "api_key" in data and data["api_key"]:
+            profiles.profiles[profile_id] = ApiKeyCredential(
+                provider=store_key, key=data["api_key"]
+            )
+        elif "base_url" in data:
+            profiles.profiles[profile_id] = ApiKeyCredential(
+                provider=store_key,
+                key=data.get("api_key", ""),
+                metadata={"base_url": data.get("base_url", "")},
+            )
+        store.set_auth_profiles(profiles)
+
+        # Also maintain flat credentials for backward compat
         store.set_bulk(store_key, data)
         self._credential_data[store_key] = data
 

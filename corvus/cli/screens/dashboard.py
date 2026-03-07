@@ -12,6 +12,8 @@ from textual.screen import Screen
 from textual.widget import Widget
 from textual.widgets import Button, Footer, Header, Label, Static
 
+from corvus.auth.health_monitor import get_all_profile_health
+from corvus.auth.profiles import AuthProfileStore
 from corvus.break_glass import BreakGlassManager
 from corvus.cli.screens.custom_modal import CustomModal
 from corvus.cli.screens.oauth_modal import OAuthModal
@@ -164,9 +166,10 @@ class DashboardScreen(Screen):
     }
     """
 
-    def __init__(self, credential_data: dict | None = None, **kwargs) -> None:
+    def __init__(self, credential_data: dict | None = None, auth_profiles: AuthProfileStore | None = None, **kwargs) -> None:
         super().__init__(**kwargs)
         self._credential_data = credential_data or {}
+        self._auth_profiles = auth_profiles or AuthProfileStore()
 
     def compose(self) -> ComposeResult:
         yield Header(show_clock=False)
@@ -221,6 +224,21 @@ class DashboardScreen(Screen):
         fields: list,
     ) -> tuple[str, str]:
         """Return (status, masked_display_value) for a provider."""
+        # Check auth profiles first
+        store_provider = "anthropic" if provider_id == "claude" else provider_id
+        provider_profiles = {
+            pid: cred for pid, cred in self._auth_profiles.profiles.items()
+            if cred.provider == store_provider
+        }
+        if provider_profiles:
+            health = get_all_profile_health(self._auth_profiles)
+            healthy = sum(1 for pid in provider_profiles if health.get(pid) and health[pid].status == "healthy")
+            total = len(provider_profiles)
+            if healthy > 0:
+                return "configured", f"{healthy}/{total} profiles"
+            return "not_configured", f"0/{total} profiles"
+
+        # Fall back to flat credential display
         svc_data = self._credential_data.get(provider_id, {})
         if provider_id == "claude":
             svc_data = self._credential_data.get("anthropic", {})
