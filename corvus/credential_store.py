@@ -16,9 +16,13 @@ Typical usage::
 from __future__ import annotations
 
 import json
+import logging
 import os
 import subprocess
+import time
 from pathlib import Path
+
+logger = logging.getLogger(__name__)
 
 
 class CredentialStore:
@@ -150,6 +154,28 @@ class CredentialStore:
             if api_key:
                 os.environ["KIMI_BOT_TOKEN"] = api_key
 
+        # Codex (ChatGPT OAuth) — inject access token, refresh if expired
+        if "codex" in self._data:
+            codex = self._data["codex"]
+            access = codex.get("access_token", "")
+            expires = int(codex.get("expires", "0"))
+            if access and expires > int(time.time()):
+                os.environ["CODEX_API_KEY"] = access
+            elif codex.get("refresh_token"):
+                try:
+                    from corvus.auth.openai_oauth import refresh_access_token
+
+                    tokens = refresh_access_token(refresh_token=codex["refresh_token"])
+                    self._data["codex"]["access_token"] = tokens.access_token
+                    self._data["codex"]["refresh_token"] = tokens.refresh_token
+                    self._data["codex"]["expires"] = str(tokens.expires)
+                    self._data["codex"]["account_id"] = tokens.account_id
+                    os.environ["CODEX_API_KEY"] = tokens.access_token
+                    if self._path is not None:
+                        self._save()
+                except Exception:
+                    logger.warning("Failed to refresh Codex OAuth token")
+
         # OpenAI-compatible -- base URL and optional key
         if "openai_compat" in self._data:
             compat = self._data["openai_compat"]
@@ -220,6 +246,7 @@ class CredentialStore:
                 "api_key": "OPENAI_COMPAT_API_KEY",
             },
             "webhook_secret": {"value": "WEBHOOK_SECRET"},
+            "codex": {"access_token": "CODEX_API_KEY"},
         }
         for service, keys in env_map.items():
             svc_data: dict[str, str] = {}
