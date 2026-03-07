@@ -32,7 +32,7 @@ from corvus.sanitize import sanitize
 
 logger = logging.getLogger(__name__)
 
-ACP_PROTOCOL_VERSION = "0.1"
+ACP_PROTOCOL_VERSION = 1
 CLIENT_NAME = "corvus-gateway"
 CLIENT_VERSION = "1.0.0"
 
@@ -89,7 +89,7 @@ class CorvusACPClient:
         return self._config.workspace
 
     def build_capabilities(self) -> dict[str, Any]:
-        """Build ACP capabilities dict based on parent agent policy.
+        """Build ACP clientCapabilities dict based on parent agent policy.
 
         Only advertises capabilities that the parent agent permits.
         If neither read nor write is allowed, the ``fs`` key is omitted entirely.
@@ -109,13 +109,9 @@ class CorvusACPClient:
         if fs:
             caps["fs"] = fs
 
-        # Terminal capabilities
+        # Terminal capabilities (ACP spec: boolean)
         if self._config.parent_allows_bash:
-            caps["terminal"] = {
-                "create": True,
-                "resize": True,
-                "input": True,
-            }
+            caps["terminal"] = True
 
         return caps
 
@@ -169,7 +165,7 @@ class CorvusACPClient:
                     "name": CLIENT_NAME,
                     "version": CLIENT_VERSION,
                 },
-                "capabilities": self.build_capabilities(),
+                "clientCapabilities": self.build_capabilities(),
             },
         )
 
@@ -199,7 +195,7 @@ class CorvusACPClient:
             "session/prompt",
             {
                 "sessionId": session_id,
-                "message": message,
+                "prompt": [{"type": "text", "text": message}],
             },
         )
 

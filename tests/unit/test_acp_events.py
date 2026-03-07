@@ -1,4 +1,7 @@
-"""Behavioral tests for ACP event translator — no mocks."""
+"""Behavioral tests for ACP event translator — no mocks.
+
+Tests use the real ACP sessionUpdate format (discriminator field).
+"""
 
 from corvus.acp.events import translate_acp_update
 
@@ -21,7 +24,10 @@ _BASE_KWARGS: dict = {
 
 
 def test_agent_message_chunk() -> None:
-    update = {"kind": "agent_message_chunk", "content": "Hello world"}
+    update = {
+        "sessionUpdate": "agent_message_chunk",
+        "content": {"type": "text", "text": "Hello world"},
+    }
     events = translate_acp_update(update, **_BASE_KWARGS)
 
     assert len(events) == 2
@@ -32,7 +38,6 @@ def test_agent_message_chunk() -> None:
     assert events[0]["run_id"] == "run_1"
     assert events[0]["session_id"] == "sess_1"
     assert events[0]["agent"] == "homelab"
-    # route_payload fields spread into event
     assert events[0]["task_type"] == "code"
 
     assert events[1]["type"] == "text"
@@ -40,8 +45,18 @@ def test_agent_message_chunk() -> None:
     assert events[1]["run_id"] == "run_1"
 
 
+def test_agent_message_chunk_raw_string_fallback() -> None:
+    """ContentBlock can also be a raw string for backwards compat."""
+    update = {"sessionUpdate": "agent_message_chunk", "content": "raw text"}
+    events = translate_acp_update(update, **_BASE_KWARGS)
+    assert events[0]["content"] == "raw text"
+
+
 def test_agent_thought_chunk() -> None:
-    update = {"kind": "agent_thought_chunk", "content": "Let me think..."}
+    update = {
+        "sessionUpdate": "agent_thought_chunk",
+        "content": {"type": "text", "text": "Let me think..."},
+    }
     events = translate_acp_update(update, **_BASE_KWARGS)
 
     assert len(events) == 1
@@ -53,29 +68,31 @@ def test_agent_thought_chunk() -> None:
 
 def test_tool_call() -> None:
     update = {
-        "kind": "tool_call",
-        "tool_name": "bash",
-        "tool_call_id": "tc_42",
-        "description": "Run ls -la",
-        "status": "running",
+        "sessionUpdate": "tool_call",
+        "toolCallId": "tc_42",
+        "title": "Reading configuration file",
+        "kind": "read",
+        "status": "pending",
     }
     events = translate_acp_update(update, **_BASE_KWARGS)
 
     assert len(events) == 1
     assert events[0]["type"] == "tool_use"
-    assert events[0]["tool_name"] == "bash"
+    assert events[0]["tool_name"] == "Reading configuration file"
     assert events[0]["tool_call_id"] == "tc_42"
-    assert events[0]["description"] == "Run ls -la"
-    assert events[0]["status"] == "running"
+    assert events[0]["kind"] == "read"
+    assert events[0]["status"] == "pending"
     assert events[0]["run_id"] == "run_1"
 
 
 def test_tool_call_update() -> None:
     update = {
-        "kind": "tool_call_update",
-        "tool_call_id": "tc_42",
+        "sessionUpdate": "tool_call_update",
+        "toolCallId": "tc_42",
         "status": "completed",
-        "content": "total 24\ndrwxr-xr-x  5 user staff",
+        "content": [
+            {"type": "content", "content": {"type": "text", "text": "Config loaded"}},
+        ],
     }
     events = translate_acp_update(update, **_BASE_KWARGS)
 
@@ -83,12 +100,27 @@ def test_tool_call_update() -> None:
     assert events[0]["type"] == "tool_result"
     assert events[0]["tool_call_id"] == "tc_42"
     assert events[0]["status"] == "completed"
-    assert events[0]["content"] == "total 24\ndrwxr-xr-x  5 user staff"
+    assert events[0]["content"] == "Config loaded"
     assert events[0]["run_id"] == "run_1"
 
 
-def test_unknown_kind_ignored() -> None:
-    update = {"kind": "some_future_event", "data": {"foo": "bar"}}
+def test_plan_update() -> None:
+    update = {
+        "sessionUpdate": "plan",
+        "entries": [
+            {"content": "Check syntax", "priority": "high", "status": "completed"},
+            {"content": "Review types", "priority": "medium", "status": "in_progress"},
+        ],
+    }
     events = translate_acp_update(update, **_BASE_KWARGS)
 
+    assert len(events) == 1
+    assert events[0]["type"] == "task_progress"
+    assert "Check syntax" in events[0]["summary"]
+    assert "Review types" in events[0]["summary"]
+
+
+def test_unknown_update_type_ignored() -> None:
+    update = {"sessionUpdate": "some_future_event", "data": {"foo": "bar"}}
+    events = translate_acp_update(update, **_BASE_KWARGS)
     assert events == []

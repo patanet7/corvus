@@ -87,7 +87,7 @@ def test_client_capabilities_full(tmp_path: Path) -> None:
 
     assert caps["fs"]["readTextFile"] is True
     assert caps["fs"]["writeTextFile"] is True
-    assert "terminal" in caps
+    assert caps["terminal"] is True
 
 
 def test_client_capabilities_no_read_no_write(tmp_path: Path) -> None:

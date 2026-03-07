@@ -2,7 +2,11 @@
 
 The frontend receives identical event shapes regardless of whether the backend
 is Claude (native) or an ACP-compatible agent (Codex CLI, Gemini CLI, etc.).
-Each ACP update ``kind`` maps to one or more Corvus WebSocket event dicts.
+Each ACP ``sessionUpdate`` type maps to one or more Corvus WebSocket event dicts.
+
+ACP spec: session/update params contain ``sessionId`` and ``update`` where
+``update.sessionUpdate`` is the discriminator (e.g. "agent_message_chunk",
+"tool_call", "plan").  Content is a ContentBlock ``{type: "text", text: "..."}``.
 """
 
 from typing import Any
@@ -20,20 +24,7 @@ def _base_fields(
     model: str,
     route_payload: dict[str, Any],
 ) -> dict[str, Any]:
-    """Return the common fields present in every Corvus WebSocket event.
-
-    Args:
-        run_id: Corvus run identifier.
-        session_id: Corvus session identifier.
-        turn_id: Current conversation turn identifier.
-        dispatch_id: Dispatch identifier for this route.
-        agent: Name of the domain agent handling the request.
-        model: Model identifier used by the ACP agent.
-        route_payload: Additional routing metadata spread into each event.
-
-    Returns:
-        Dict of common event fields.
-    """
+    """Return the common fields present in every Corvus WebSocket event."""
     base: dict[str, Any] = {
         "run_id": run_id,
         "session_id": session_id,
@@ -44,6 +35,15 @@ def _base_fields(
     }
     base.update(route_payload)
     return base
+
+
+def _extract_text(content: Any) -> str:
+    """Extract text from an ACP ContentBlock or raw string."""
+    if isinstance(content, dict):
+        return content.get("text", "")
+    if isinstance(content, str):
+        return content
+    return ""
 
 
 def translate_acp_update(
@@ -60,11 +60,10 @@ def translate_acp_update(
 ) -> list[dict[str, Any]]:
     """Translate an ACP session/update notification into Corvus WebSocket events.
 
-    Maps ACP update kinds to the Corvus event format so the frontend sees a
-    consistent event stream regardless of the backend agent protocol.
+    The ACP ``update`` dict uses ``sessionUpdate`` as the discriminator field.
 
     Args:
-        update: Raw ACP update dict containing at minimum a ``kind`` field.
+        update: Raw ACP update dict from session/update params.update.
         run_id: Corvus run identifier.
         session_id: Corvus session identifier.
         turn_id: Current conversation turn identifier.
@@ -75,9 +74,9 @@ def translate_acp_update(
         route_payload: Additional routing metadata spread into each event.
 
     Returns:
-        List of Corvus WebSocket event dicts. Empty list for unknown kinds.
+        List of Corvus WebSocket event dicts. Empty list for unknown types.
     """
-    kind: str = update.get("kind", "")
+    update_type: str = update.get("sessionUpdate", "")
     base = _base_fields(
         run_id=run_id,
         session_id=session_id,
@@ -88,8 +87,8 @@ def translate_acp_update(
         route_payload=route_payload,
     )
 
-    if kind == "agent_message_chunk":
-        content = sanitize(update.get("content", ""))
+    if update_type == "agent_message_chunk":
+        content = sanitize(_extract_text(update.get("content", "")))
         return [
             {
                 **base,
@@ -105,8 +104,8 @@ def translate_acp_update(
             },
         ]
 
-    if kind == "agent_thought_chunk":
-        content = sanitize(update.get("content", ""))
+    if update_type == "agent_thought_chunk":
+        content = sanitize(_extract_text(update.get("content", "")))
         return [
             {
                 **base,
@@ -115,50 +114,63 @@ def translate_acp_update(
             },
         ]
 
-    if kind == "tool_call":
+    if update_type == "tool_call":
         return [
             {
                 **base,
                 "type": "tool_use",
-                "tool_name": update.get("tool_name", "unknown"),
-                "tool_call_id": update.get("tool_call_id", ""),
-                "description": update.get("description", ""),
-                "status": update.get("status", ""),
+                "tool_name": update.get("title", "unknown"),
+                "tool_call_id": update.get("toolCallId", ""),
+                "kind": update.get("kind", ""),
+                "status": update.get("status", "pending"),
             },
         ]
 
-    if kind == "tool_call_update":
-        content = sanitize(update.get("content", ""))
+    if update_type == "tool_call_update":
+        # Content is an array of ToolCallContent items
+        raw_content = update.get("content", [])
+        text_parts = []
+        if isinstance(raw_content, list):
+            for item in raw_content:
+                if isinstance(item, dict) and "content" in item:
+                    text_parts.append(_extract_text(item["content"]))
+        content = sanitize("\n".join(text_parts))
         return [
             {
                 **base,
                 "type": "tool_result",
-                "tool_call_id": update.get("tool_call_id", ""),
+                "tool_call_id": update.get("toolCallId", ""),
                 "status": update.get("status", ""),
                 "content": content,
             },
         ]
 
-    if kind == "plan":
-        content = sanitize(update.get("content", ""))
+    if update_type == "plan":
+        entries = update.get("entries", [])
+        summary = "; ".join(
+            f"[{e.get('status', '?')}] {e.get('content', '')}"
+            for e in entries
+            if isinstance(e, dict)
+        )
         return [
             {
                 **base,
                 "type": "task_progress",
                 "status": "planning",
-                "summary": content,
+                "summary": sanitize(summary),
+                "entries": entries,
             },
         ]
 
-    if kind in ("available_commands_update", "current_mode_update"):
+    if update_type in ("available_commands_update", "current_mode_update", "config_options_update"):
         return [
             {
                 **base,
                 "type": "agent_status",
-                "acp_kind": kind,
-                "data": update.get("data", {}),
+                "acp_kind": update_type,
+                "data": {k: v for k, v in update.items() if k != "sessionUpdate"},
             },
         ]
 
-    # Unknown kinds are silently ignored.
+    # Unknown update types are silently ignored.
     return []

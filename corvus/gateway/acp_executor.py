@@ -260,8 +260,9 @@ async def execute_acp_run(
             params = msg.get("params", {})
 
             if method == "session/update":
+                update_data = params.get("update", params)
                 events = translate_acp_update(
-                    params,
+                    update_data,
                     run_id=run_id,
                     session_id=session_id,
                     turn_id=turn.turn_id,
