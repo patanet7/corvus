@@ -13,8 +13,15 @@ class TestMaskValue:
         """Values shorter than 8 chars get fully masked."""
         assert mask_value("short") == "..."
 
-    def test_masks_url(self) -> None:
+    def test_masks_exactly_8_chars(self) -> None:
+        """Value with exactly visible_chars length is fully masked."""
+        assert mask_value("12345678") == "..."
+
+    def test_masks_https_url(self) -> None:
         assert mask_value("https://ha.local:8123/api") == "https://..."
+
+    def test_masks_http_url(self) -> None:
+        assert mask_value("http://internal-server/api") == "http://..."
 
     def test_empty_string(self) -> None:
         assert mask_value("") == ""
@@ -28,10 +35,7 @@ class TestSetBulk:
 
     def test_set_bulk_writes_multiple_keys(self) -> None:
         """set_bulk should write all keys then encrypt once."""
-        store = CredentialStore.__new__(CredentialStore)
-        store._path = None
-        store._age_key_file = ""
-        store._data = {}
+        store = CredentialStore.from_env()
 
         store.set_bulk("codex", {
             "access_token": "tok_abc",
@@ -39,17 +43,15 @@ class TestSetBulk:
             "expires": "999999",
         })
 
-        assert store._data["codex"]["access_token"] == "tok_abc"
-        assert store._data["codex"]["refresh_token"] == "tok_ref"
-        assert store._data["codex"]["expires"] == "999999"
+        assert store.get("codex", "access_token") == "tok_abc"
+        assert store.get("codex", "refresh_token") == "tok_ref"
+        assert store.get("codex", "expires") == "999999"
 
     def test_set_bulk_merges_with_existing(self) -> None:
-        store = CredentialStore.__new__(CredentialStore)
-        store._path = None
-        store._age_key_file = ""
-        store._data = {"codex": {"account_id": "acc_123"}}
+        store = CredentialStore.from_env()
+        store.set_bulk("codex", {"account_id": "acc_123"})
 
         store.set_bulk("codex", {"access_token": "new_tok"})
 
-        assert store._data["codex"]["account_id"] == "acc_123"
-        assert store._data["codex"]["access_token"] == "new_tok"
+        assert store.get("codex", "account_id") == "acc_123"
+        assert store.get("codex", "access_token") == "new_tok"
