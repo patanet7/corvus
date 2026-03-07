@@ -23,6 +23,7 @@ import time
 from pathlib import Path
 
 from corvus.auth.openai_oauth import refresh_access_token
+from corvus.auth.profiles import AuthProfileStore
 
 logger = logging.getLogger(__name__)
 
@@ -144,6 +145,17 @@ class CredentialStore:
                 if isinstance(v, str) and v:
                     values.append(v)
         return values
+
+    def get_auth_profiles(self) -> AuthProfileStore:
+        """Return the auth profile store from credential data."""
+        raw = self._data.get("_auth_profiles", {})
+        return AuthProfileStore.from_dict(raw)
+
+    def set_auth_profiles(self, profiles: AuthProfileStore) -> None:
+        """Save auth profiles to credential data and re-encrypt if backed by file."""
+        self._data["_auth_profiles"] = profiles.to_dict()
+        if self._path is not None:
+            self._save()
 
     def inject(self) -> None:
         """Call configure() on each tool module with stored credentials.
