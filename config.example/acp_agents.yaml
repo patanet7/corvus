@@ -1,10 +1,12 @@
-# ACP agent definitions — coding agents Corvus can spawn as sub-agents.
+# ACP agent definitions — non-Claude coding agents Corvus can spawn.
+# Claude is handled natively via claude-agent-sdk, not ACP.
+#
+# Each entry maps a name to a command that speaks ACP over stdio.
+# To use an ACP agent, set backend: acp in config/models.yaml
+# and metadata.acp_agent: <name> in the agent's YAML.
 agents:
   codex:
-    command: "npx @zed-industries/codex-acp"
-    default_permissions: approve-reads
-  claude:
-    command: "npx -y @zed-industries/claude-agent-acp"
+    command: "npx -y @zed-industries/codex-acp"
     default_permissions: approve-reads
   gemini:
     command: "gemini"

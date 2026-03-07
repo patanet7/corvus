@@ -1,0 +1,28 @@
+# Schedule definitions — cron-triggered agent prompts.
+# Runtime overrides stored in SQLite schedules table.
+# New entries here auto-register on gateway startup.
+
+schedules:
+  morning_briefing:
+    description: "Daily morning briefing with agenda and priorities"
+    type: prompt
+    agent: personal
+    cron: "0 7 * * *"
+    enabled: true
+    prompt_template: |
+      Generate my morning briefing for today. Search memory for:
+      - Pending action items and todos
+      - Recent meeting notes and follow-ups
+      - Upcoming deadlines
+
+  weekly_review:
+    description: "Weekly rollup and planning"
+    type: prompt
+    agent: personal
+    cron: "0 9 * * 0"
+    enabled: false
+    prompt_template: |
+      Generate my weekly review. Search memory for the past 7 days:
+      - Accomplishments and completed items
+      - Missed or deferred items
+      - Patterns and insights

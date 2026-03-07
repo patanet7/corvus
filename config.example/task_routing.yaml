@@ -1,0 +1,43 @@
+defaults:
+  enable_decomposition: true
+  expand_from_router: true
+  max_subtasks: 6
+
+task_types:
+  coding:
+    keywords:
+      - refactor
+      - implement
+      - bug
+      - fix
+      - test
+      - code
+    decomposition:
+      enabled: true
+      subtasks:
+        - id: triage
+          agent: work
+          skill: triage
+          instruction: "Triage requirements, identify risks, and define an execution checklist."
+        - id: implementation
+          agent: work
+          skill: data-transform
+          instruction: "Implement code changes and validate behavior with tests."
+
+  research:
+    keywords:
+      - compare
+      - research
+      - evaluate
+      - options
+    decomposition:
+      enabled: true
+      subtasks:
+        - id: gather
+          agent: work
+          skill: summarize
+          instruction: "Collect and structure the key facts and options."
+        - id: summary
+          agent: docs
+          skill: summarize
+          instruction: "Produce a concise decision-ready recommendation."

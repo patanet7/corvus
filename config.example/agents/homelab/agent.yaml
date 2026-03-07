@@ -1,0 +1,30 @@
+name: homelab
+description: >
+  Server management, Docker containers, fleet operations,
+  log queries, network management, storage, and infrastructure
+enabled: true
+models:
+  preferred: null
+  fallback: null
+  auto: true
+  complexity: high
+tools:
+  builtin:
+    - Bash
+    - Read
+    - Grep
+    - Glob
+  modules:
+    obsidian:
+      allowed_prefixes:
+        - "homelab/"
+      read: true
+      write: true
+  confirm_gated:
+    - obsidian.write
+    - obsidian.append
+memory:
+  own_domain: homelab
+  readable_domains: null
+  can_read_shared: true
+  can_write: true
