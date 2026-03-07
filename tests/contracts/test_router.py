@@ -4,7 +4,7 @@ Tests the prompt construction and response parsing.
 Does NOT call Claude API -- tests the routing logic, not the LLM.
 """
 
-from corvus.router import VALID_AGENTS, RouterAgent, build_routing_prompt
+from corvus.router import VALID_AGENTS, RouterAgent
 
 
 def test_valid_agents_contains_all_nine():
@@ -15,7 +15,8 @@ def test_valid_agents_contains_all_nine():
 
 
 def test_build_routing_prompt_contains_all_agents():
-    prompt = build_routing_prompt()
+    router = RouterAgent(api_key="test")
+    prompt = router._build_routing_prompt()
     for agent in VALID_AGENTS:
         assert agent in prompt
 

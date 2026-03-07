@@ -50,11 +50,6 @@ class _AgentRegistryProtocol(Protocol):
     def list_enabled(self) -> list: ...
 
 
-def build_routing_prompt() -> str:
-    """Return the fallback routing system prompt."""
-    return _FALLBACK_ROUTING_PROMPT
-
-
 ROUTER_MODEL_DEFAULT = "claude-haiku-4-5-20251001"
 
 
