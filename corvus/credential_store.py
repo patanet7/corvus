@@ -43,6 +43,7 @@ logger = logging.getLogger(__name__)
 #   - from_env(): populate credential store from env vars (Docker/CI)
 #
 # To add a new service, add an entry here AND a ToolModuleEntry in modules.py.
+# modules.py derives requires_env from this map — no duplication needed.
 # ---------------------------------------------------------------------------
 SERVICE_ENV_MAP: dict[str, dict[str, str]] = {
     "ha": {"url": "HA_URL", "token": "HA_TOKEN"},

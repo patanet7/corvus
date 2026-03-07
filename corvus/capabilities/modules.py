@@ -22,6 +22,7 @@ from typing import Any, TypedDict, cast
 from claude_agent_sdk import create_sdk_mcp_server
 
 from corvus.capabilities.registry import ToolModuleEntry
+from corvus.credential_store import SERVICE_ENV_MAP
 from corvus.google_client import GoogleClient
 from corvus.tools.drive import (
     configure as drive_configure,
@@ -148,7 +149,7 @@ def _obsidian_entry() -> ToolModuleEntry:
         configure=configure,
         create_tools=create_tools,
         create_mcp_server=create_mcp,
-        requires_env=["OBSIDIAN_URL", "OBSIDIAN_API_KEY"],
+        requires_env=list(SERVICE_ENV_MAP["obsidian"].values()),
         supports_per_agent=True,
     )
 
@@ -208,7 +209,7 @@ def _email_entry() -> ToolModuleEntry:
         configure=configure,
         create_tools=create_tools,
         create_mcp_server=create_mcp,
-        requires_env=["GOOGLE_CREDS_PATH"],
+        requires_env=list(SERVICE_ENV_MAP["google"].values()),
     )
 
 
@@ -255,7 +256,7 @@ def _drive_entry() -> ToolModuleEntry:
         configure=configure,
         create_tools=create_tools,
         create_mcp_server=create_mcp,
-        requires_env=["GOOGLE_CREDS_PATH"],
+        requires_env=list(SERVICE_ENV_MAP["google"].values()),
     )
 
 
@@ -285,7 +286,7 @@ def _ha_entry() -> ToolModuleEntry:
         configure=configure,
         create_tools=create_tools,
         create_mcp_server=create_mcp,
-        requires_env=["HA_URL", "HA_TOKEN"],
+        requires_env=list(SERVICE_ENV_MAP["ha"].values()),
     )
 
 
@@ -321,7 +322,7 @@ def _paperless_entry() -> ToolModuleEntry:
         configure=configure,
         create_tools=create_tools,
         create_mcp_server=create_mcp,
-        requires_env=["PAPERLESS_URL", "PAPERLESS_API_TOKEN"],
+        requires_env=list(SERVICE_ENV_MAP["paperless"].values()),
     )
 
 
@@ -357,7 +358,7 @@ def _firefly_entry() -> ToolModuleEntry:
         configure=configure,
         create_tools=create_tools,
         create_mcp_server=create_mcp,
-        requires_env=["FIREFLY_URL", "FIREFLY_API_TOKEN"],
+        requires_env=list(SERVICE_ENV_MAP["firefly"].values()),
     )
 
 

@@ -43,14 +43,12 @@ from tests.contracts.fake_obsidian_api import (
 @contextmanager
 def _unconfigured_obsidian():
     """Temporarily clear obsidian module config and restore afterward."""
-    saved_url, saved_key = obsidian_module._base_url, obsidian_module._api_key
-    obsidian_module._base_url = None
-    obsidian_module._api_key = None
+    saved_client = obsidian_module._client
+    obsidian_module._client = None
     try:
         yield
     finally:
-        obsidian_module._base_url = saved_url
-        obsidian_module._api_key = saved_key
+        obsidian_module._client = saved_client
 
 
 def _all_text_from_result(result: dict) -> str:
@@ -156,8 +154,10 @@ class TestErrorMessagesNoCredentialLeak:
         assert "error" in text.lower()
 
     def test_bad_token_error_clean(self) -> None:
+        current_client = obsidian_module._client
+        base_url = current_client._base_url if current_client else "http://127.0.0.1:1"
         configure_obsidian(
-            obsidian_module._base_url or "http://127.0.0.1:1",
+            base_url,
             "wrong-token-12345",
         )
         result = obsidian_search(query="test")

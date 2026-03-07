@@ -27,14 +27,12 @@ def _unconfigured_obsidian():
     """Temporarily clear obsidian module config and restore afterward."""
     from corvus.tools import obsidian as mod
 
-    saved_url, saved_key = mod._base_url, mod._api_key
-    mod._base_url = None
-    mod._api_key = None
+    saved_client = mod._client
+    mod._client = None
     try:
         yield
     finally:
-        mod._base_url = saved_url
-        mod._api_key = saved_key
+        mod._client = saved_client
 
 
 @pytest.fixture(autouse=True)

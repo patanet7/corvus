@@ -30,14 +30,14 @@ def _parse_tool_content(result: dict) -> dict:
 
 @contextmanager
 def _reset_prefix():
-    """Reset _allowed_prefixes to None after each use."""
+    """Reset the module-level client to restore prefix state after use."""
     from corvus.tools import obsidian as mod
 
-    saved = mod._allowed_prefixes
+    saved_client = mod._client
     try:
         yield
     finally:
-        mod._allowed_prefixes = saved
+        mod._client = saved_client
 
 
 @pytest.fixture(autouse=True)

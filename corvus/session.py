@@ -40,7 +40,10 @@ def _get_anthropic_client() -> AsyncAnthropic:
 
 # Validation allowlist for LLM extraction output — matches agent YAML specs
 # in config/agents/. "general" excluded: cross-domain queries get tagged by
-# actual domain. Update this set when adding new agent domains.
+# actual domain. "shared" is a cross-domain visibility tag, not an agent.
+# NOTE: RouterAgent.get_valid_agents() reads dynamically from AgentRegistry.
+# This static set is only used to validate LLM memory extraction output and
+# falls back to "shared" for unknown domains — low-risk if slightly stale.
 VALID_DOMAINS = {
     "personal",
     "work",

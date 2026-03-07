@@ -36,6 +36,81 @@ if not os.environ.get("ANTHROPIC_API_KEY"):
 
 import pytest  # noqa: E402
 
+# ---------------------------------------------------------------------------
+# Credential env isolation — snapshot/restore credential-related env vars
+# around every test so injection tests can't pollute routing or other tests.
+# ---------------------------------------------------------------------------
+
+_CREDENTIAL_ENV_VARS = [
+    # LLM providers
+    "ANTHROPIC_API_KEY", "ANTHROPIC_BASE_URL",
+    "OPENAI_API_KEY", "OLLAMA_BASE_URL", "KIMI_BOT_TOKEN",
+    "CODEX_API_KEY",
+    "OPENAI_COMPAT_BASE_URL", "OPENAI_COMPAT_API_KEY",
+    # Services (from SERVICE_ENV_MAP)
+    "HA_URL", "HA_TOKEN",
+    "PAPERLESS_URL", "PAPERLESS_API_TOKEN",
+    "FIREFLY_URL", "FIREFLY_API_TOKEN",
+    "OBSIDIAN_URL", "OBSIDIAN_API_KEY",
+    # Google
+    "GOOGLE_CREDS_PATH",
+]
+
+
+@pytest.fixture(autouse=True)
+def _isolate_credential_env():
+    """Snapshot and restore credential env vars around every test.
+
+    This prevents credential injection tests from polluting the environment
+    for subsequent tests (e.g. routing tests that need ANTHROPIC_API_KEY=ollama).
+    """
+    snapshot = {var: os.environ.get(var) for var in _CREDENTIAL_ENV_VARS}
+    yield
+    for var, val in snapshot.items():
+        if val is not None:
+            os.environ[var] = val
+        else:
+            os.environ.pop(var, None)
+
+# ---------------------------------------------------------------------------
+# Tool module global isolation — snapshot/restore module-level config globals
+# so configure() calls in one test don't leak into the next.
+# ---------------------------------------------------------------------------
+
+from corvus.tools import drive as _drive_mod  # noqa: E402
+from corvus.tools import email as _email_mod  # noqa: E402
+from corvus.tools import firefly as _firefly_mod  # noqa: E402
+from corvus.tools import ha as _ha_mod  # noqa: E402
+from corvus.tools import obsidian as _obsidian_mod  # noqa: E402
+from corvus.tools import paperless as _paperless_mod  # noqa: E402
+
+_TOOL_MODULE_GLOBALS = [
+    (_ha_mod, "_ha_url"),
+    (_ha_mod, "_ha_token"),
+    (_paperless_mod, "_paperless_url"),
+    (_paperless_mod, "_paperless_token"),
+    (_firefly_mod, "_firefly_url"),
+    (_firefly_mod, "_firefly_token"),
+    (_obsidian_mod, "_client"),
+    (_email_mod, "_google_client"),
+    (_email_mod, "_yahoo_client"),
+    (_drive_mod, "_client"),
+]
+
+
+@pytest.fixture(autouse=True)
+def _isolate_tool_modules():
+    """Snapshot and restore all tool module globals around every test.
+
+    Replaces scattered try/finally blocks and per-file _clean_tool_modules
+    fixtures. Any test that calls configure() gets automatic cleanup.
+    """
+    snapshot = [(mod, attr, getattr(mod, attr)) for mod, attr in _TOOL_MODULE_GLOBALS]
+    yield
+    for mod, attr, orig_val in snapshot:
+        setattr(mod, attr, orig_val)
+
+
 from corvus.memory.backends.fts5 import FTS5Backend  # noqa: E402
 from corvus.memory.config import MemoryConfig  # noqa: E402
 from corvus.memory.hub import MemoryHub  # noqa: E402
