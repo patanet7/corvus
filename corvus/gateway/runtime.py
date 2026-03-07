@@ -12,6 +12,7 @@ from pathlib import Path
 
 from fastapi import WebSocket
 
+from corvus.acp.registry import AcpAgentRegistry
 from corvus.agents.hub import AgentsHub
 from corvus.agents.registry import AgentRegistry
 from corvus.break_glass import BreakGlassManager
@@ -35,9 +36,9 @@ from corvus.events import EventEmitter, JSONLFileSink
 from corvus.gateway.control_plane import BreakGlassSessionRegistry, DispatchControlRegistry
 from corvus.gateway.task_planner import TaskPlanner
 from corvus.gateway.trace_hub import TraceHub
+from corvus.litellm_manager import LiteLLMManager
 from corvus.memory import MemoryConfig, MemoryHub
 from corvus.memory.backends.protocol import MemoryBackend
-from corvus.litellm_manager import LiteLLMManager
 from corvus.model_router import ModelRouter
 from corvus.router import RouterAgent
 from corvus.sanitize import register_credential_patterns
@@ -67,6 +68,7 @@ class GatewayRuntime:
     trace_hub: TraceHub
     dispatch_controls: DispatchControlRegistry
     break_glass: BreakGlassSessionRegistry
+    acp_registry: AcpAgentRegistry
     active_connections: set[WebSocket]
 
 
@@ -215,6 +217,10 @@ def build_runtime() -> GatewayRuntime:
     break_glass_mgr = BreakGlassManager()
     break_glass = BreakGlassSessionRegistry(break_glass_mgr)
 
+    acp_registry = AcpAgentRegistry(config_dir=Path("config"))
+    acp_registry.load()
+    logger.info("AcpAgentRegistry loaded %d agents", len(acp_registry.list_agents()))
+
     active_connections: set[WebSocket] = set()
     scheduler.set_connections(active_connections)
 
@@ -234,5 +240,6 @@ def build_runtime() -> GatewayRuntime:
         trace_hub=trace_hub,
         dispatch_controls=dispatch_controls,
         break_glass=break_glass,
+        acp_registry=acp_registry,
         active_connections=active_connections,
     )

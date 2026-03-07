@@ -15,6 +15,7 @@ from typing import TYPE_CHECKING, Any
 from claude_agent_sdk import ClaudeSDKClient
 from claude_agent_sdk.types import AssistantMessage, ResultMessage, TextBlock
 
+from corvus.gateway.acp_executor import execute_acp_run as _execute_acp_run
 from corvus.gateway.options import (
     build_backend_options,
     resolve_backend_and_model,
@@ -24,13 +25,14 @@ from corvus.gateway.options import (
 from corvus.gateway.workspace_runtime import prepare_agent_workspace
 
 if TYPE_CHECKING:
+    from fastapi import WebSocket
+
     from corvus.gateway.chat_session import TurnContext
     from corvus.gateway.confirm_queue import ConfirmQueue
     from corvus.gateway.runtime import GatewayRuntime
     from corvus.gateway.session_emitter import SessionEmitter
     from corvus.gateway.task_planner import TaskRoute
     from corvus.session import SessionTranscript
-    from fastapi import WebSocket
 
 logger = logging.getLogger("corvus-gateway")
 
@@ -101,6 +103,21 @@ async def execute_agent_run(
         agent_name=agent_name,
         requested_model=requested_model,
     )
+
+    # ACP backend: delegate to ACP executor
+    if backend_name == "acp":
+        return await _execute_acp_run(
+            emitter=emitter,
+            runtime=runtime,
+            turn=turn,
+            route=route,
+            route_index=route_index,
+            transcript=transcript,
+            user=user,
+            confirm_queue=confirm_queue,
+            acp_registry=runtime.acp_registry,
+        )
+
     active_model_id = ui_model_id(backend_name, active_model)
     model_info = runtime.model_router.get_model_info(active_model_id)
     chunk_index = 0
