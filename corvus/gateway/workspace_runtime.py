@@ -116,3 +116,32 @@ def prepare_agent_workspace(*, session_id: str, agent_name: str) -> Path:
         workspace_dir.mkdir(parents=True, exist_ok=True)
 
     return workspace_dir
+
+
+def copy_agent_skills(
+    agent_name: str,
+    config_dir: Path,
+    workspace_dir: Path,
+    shared_skills: list[str] | None = None,
+) -> None:
+    """Copy agent-specific and shared skills into workspace .claude/skills/."""
+    skills_dest = workspace_dir / ".claude" / "skills"
+
+    # Agent-specific skills
+    agent_skills_dir = config_dir / "config" / "agents" / agent_name / "skills"
+    if agent_skills_dir.is_dir():
+        skills_dest.mkdir(parents=True, exist_ok=True)
+        for skill_file in agent_skills_dir.glob("*.md"):
+            shutil.copy2(skill_file, skills_dest / skill_file.name)
+
+    # Shared skills
+    if shared_skills:
+        shared_dir = config_dir / "config" / "skills" / "shared"
+        if shared_dir.is_dir():
+            skills_dest.mkdir(parents=True, exist_ok=True)
+            for skill_name in shared_skills:
+                src = shared_dir / f"{skill_name}.md"
+                if src.exists():
+                    shutil.copy2(src, skills_dest / src.name)
+                else:
+                    logger.warning("Shared skill '%s' not found at %s", skill_name, src)
