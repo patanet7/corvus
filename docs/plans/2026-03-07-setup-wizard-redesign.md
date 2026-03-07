@@ -221,7 +221,7 @@ Dashboard
 
 | ID | Label | Auth Type | Fields |
 |----|-------|-----------|--------|
-| claude | Anthropic Claude | multi-method | Three auth methods in one modal (see below) |
+| claude | Anthropic Claude | claude_multi | Two paste methods in one modal (see below). Corvus stores its own isolated copy — no Keychain sharing. |
 | openai | OpenAI | API key | api_key (password, sk- validation) |
 | codex | Codex (ChatGPT) | OAuth | browser-based PKCE flow |
 | ollama | Ollama (local) | URL | base_url (default: http://localhost:11434) |
@@ -230,21 +230,14 @@ Dashboard
 
 **Claude auth methods (shown in the Claude edit modal):**
 
-**Method 1: Claude Code CLI (auto-detected)**
-- Claude Code stores OAuth tokens in macOS Keychain (`Claude Code-credentials`) or `~/.claude/.credentials.json` on Linux
-- The `claude-agent-sdk` reads these automatically — no env var needed
-- Wizard detects the Keychain entry and shows "Authenticated (Claude {subscriptionType})" with expiry
-- Token format: `sk-ant-oat01-...` (access), `sk-ant-ort01-...` (refresh)
-- Nothing to configure — just status display
-
-**Method 2: Setup token (paste)**
+**Method 1: Setup token (paste) — recommended**
 - User runs `claude setup-token` on any machine — generates a token string
 - User pastes the token into the wizard
 - Stored as `anthropic/setup_token` in credential store
 - No automatic refresh — works like an API key
 - Following OpenClaw's pattern
 
-**Method 3: API key (paste)**
+**Method 2: API key (paste)**
 - User pastes `sk-ant-...` API key (from Anthropic Console)
 - Stored as `anthropic/api_key` in credential store
 - `inject()` sets `ANTHROPIC_API_KEY` env var (existing behavior)
