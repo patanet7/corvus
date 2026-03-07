@@ -1,0 +1,14 @@
+# ACP agent definitions — coding agents Corvus can spawn as sub-agents.
+agents:
+  codex:
+    command: "npx @zed-industries/codex-acp"
+    default_permissions: approve-reads
+  claude:
+    command: "npx -y @zed-industries/claude-agent-acp"
+    default_permissions: approve-reads
+  gemini:
+    command: "gemini"
+    default_permissions: approve-reads
+  opencode:
+    command: "npx -y opencode-ai acp"
+    default_permissions: deny-all
