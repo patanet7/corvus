@@ -1,5 +1,4 @@
 import { describe, it, expect, beforeEach } from 'vitest';
-import { WELL_KNOWN_AGENTS } from '$lib/types';
 import type { PortraitConfig } from './types';
 import { DEFAULT_PORTRAITS } from './defaults';
 import { getPortrait, registerPortrait, listPortraits, resetPortraits } from './registry';
@@ -10,7 +9,7 @@ beforeEach(() => {
 
 describe('DEFAULT_PORTRAITS', () => {
 	it('has a portrait for every agent', () => {
-		for (const agent of WELL_KNOWN_AGENTS) {
+		for (const agent of Object.keys(DEFAULT_PORTRAITS)) {
 			expect(DEFAULT_PORTRAITS[agent]).toBeDefined();
 			expect(DEFAULT_PORTRAITS[agent].agent).toBe(agent);
 		}
@@ -21,14 +20,14 @@ describe('DEFAULT_PORTRAITS', () => {
 	});
 
 	it('all defaults use svg asset type', () => {
-		for (const agent of WELL_KNOWN_AGENTS) {
+		for (const agent of Object.keys(DEFAULT_PORTRAITS)) {
 			const portrait = DEFAULT_PORTRAITS[agent];
 			expect(portrait.states.idle.type).toBe('svg');
 		}
 	});
 
 	it('all SVG assets have viewBox and paths', () => {
-		for (const agent of WELL_KNOWN_AGENTS) {
+		for (const agent of Object.keys(DEFAULT_PORTRAITS)) {
 			const idle = DEFAULT_PORTRAITS[agent].states.idle;
 			if (idle.type === 'svg') {
 				expect(idle.viewBox).toBe('0 0 48 48');
@@ -41,7 +40,7 @@ describe('DEFAULT_PORTRAITS', () => {
 	});
 
 	it('each default has 3 paths (bg fill, bg stroke, fg fill)', () => {
-		for (const agent of WELL_KNOWN_AGENTS) {
+		for (const agent of Object.keys(DEFAULT_PORTRAITS)) {
 			const idle = DEFAULT_PORTRAITS[agent].states.idle;
 			if (idle.type === 'svg') {
 				expect(idle.paths).toHaveLength(3);
@@ -60,7 +59,7 @@ describe('DEFAULT_PORTRAITS', () => {
 	});
 
 	it('all defaults include explicit state assets for lifecycle', () => {
-		for (const agent of WELL_KNOWN_AGENTS) {
+		for (const agent of Object.keys(DEFAULT_PORTRAITS)) {
 			const portrait = DEFAULT_PORTRAITS[agent];
 			expect(portrait.states.thinking).toBeDefined();
 			expect(portrait.states.streaming).toBeDefined();

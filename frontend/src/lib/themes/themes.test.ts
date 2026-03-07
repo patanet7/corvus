@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import type { ThemeConfig, FontDef } from './types';
-import { WELL_KNOWN_AGENTS } from '$lib/types';
+import { DEFAULT_PORTRAITS } from '$lib/portraits/defaults';
 import { opsCockpit } from './themes/ops-cockpit';
 import { retroTerminal } from './themes/retro-terminal';
 import { darkFantasy } from './themes/dark-fantasy';
@@ -57,9 +57,9 @@ describe('ThemeConfig type definitions', () => {
 		expect(theme.details).toBeDefined();
 	});
 
-	it('ThemeConfig colors.agents covers all AgentName values', () => {
+	it('ThemeConfig colors.agents covers all default portrait agents', () => {
 		const theme = createMinimalTheme();
-		for (const name of WELL_KNOWN_AGENTS) {
+		for (const name of Object.keys(DEFAULT_PORTRAITS)) {
 			expect(theme.colors.agents[name]).toBeDefined();
 			expect(typeof theme.colors.agents[name]).toBe('string');
 		}
@@ -159,8 +159,8 @@ describe('Ops Cockpit theme', () => {
 			expect(opsCockpit.colors.agents.general).toBe('#94a3b8');
 		});
 
-	it('covers all agent names', () => {
-		for (const name of WELL_KNOWN_AGENTS) {
+	it('covers all default portrait agents', () => {
+		for (const name of Object.keys(DEFAULT_PORTRAITS)) {
 			expect(opsCockpit.colors.agents[name]).toBeDefined();
 		}
 	});
@@ -247,8 +247,8 @@ describe('Retro Terminal theme', () => {
 		expect(Object.keys(retroTerminal.colors.agents)).toHaveLength(10);
 	});
 
-	it('covers all agent names', () => {
-		for (const name of WELL_KNOWN_AGENTS) {
+	it('covers all default portrait agents', () => {
+		for (const name of Object.keys(DEFAULT_PORTRAITS)) {
 			expect(retroTerminal.colors.agents[name]).toBeDefined();
 		}
 	});
@@ -360,8 +360,8 @@ describe('Dark Fantasy theme', () => {
 		expect(Object.keys(darkFantasy.colors.agents)).toHaveLength(10);
 	});
 
-	it('covers all agent names', () => {
-		for (const name of WELL_KNOWN_AGENTS) {
+	it('covers all default portrait agents', () => {
+		for (const name of Object.keys(DEFAULT_PORTRAITS)) {
 			expect(darkFantasy.colors.agents[name]).toBeDefined();
 		}
 	});
