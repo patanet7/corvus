@@ -158,7 +158,10 @@ class CredentialStore:
         if "codex" in self._data:
             codex = self._data["codex"]
             access = codex.get("access_token", "")
-            expires = int(codex.get("expires", "0"))
+            try:
+                expires = int(codex.get("expires", "0"))
+            except (ValueError, TypeError):
+                expires = 0
             if access and expires > int(time.time()):
                 os.environ["CODEX_API_KEY"] = access
             elif codex.get("refresh_token"):
@@ -173,8 +176,8 @@ class CredentialStore:
                     os.environ["CODEX_API_KEY"] = tokens.access_token
                     if self._path is not None:
                         self._save()
-                except Exception:
-                    logger.warning("Failed to refresh Codex OAuth token")
+                except Exception as exc:
+                    logger.warning("Failed to refresh Codex OAuth token: %s", exc)
 
         # OpenAI-compatible -- base URL and optional key
         if "openai_compat" in self._data:
