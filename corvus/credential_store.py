@@ -23,7 +23,17 @@ import time
 from pathlib import Path
 
 from corvus.auth.openai_oauth import refresh_access_token
-from corvus.auth.profiles import AuthProfileStore
+from corvus.auth.profile_resolver import resolve_profile
+from corvus.auth.profiles import (
+    ApiKeyCredential,
+    AuthProfileStore,
+    OAuthCredential,
+    TokenCredential,
+)
+from corvus.tools.firefly import configure as configure_firefly
+from corvus.tools.ha import configure as configure_ha
+from corvus.tools.obsidian import configure as configure_obsidian
+from corvus.tools.paperless import configure as configure_paperless
 
 logger = logging.getLogger(__name__)
 
@@ -158,42 +168,72 @@ class CredentialStore:
             self._save()
 
     def inject(self) -> None:
-        """Call configure() on each tool module with stored credentials.
+        """Inject credentials into environment and configure tool modules.
 
-        For each service key in the store, import the corresponding tool
-        module and call its ``configure()`` function with the stored URL
-        and token.  Services that are not present in the store are silently
-        skipped.
-
-        The ``anthropic`` service is handled specially: its ``api_key``
-        is set as the ``ANTHROPIC_API_KEY`` environment variable (the
-        Anthropic SDK reads from that env var).
+        Checks auth profiles first. Falls back to legacy flat credentials
+        if no profiles exist.
         """
-        # Anthropic -- SDK reads from env var
+        auth_profiles = self.get_auth_profiles()
+        if auth_profiles.profiles:
+            self._inject_from_profiles(auth_profiles)
+        else:
+            self._inject_flat_credentials()
+        self._inject_services()
+
+    def _inject_from_profiles(self, auth_profiles: AuthProfileStore) -> None:
+        """Inject credentials from auth profiles into environment."""
+        provider_env_map = {
+            "anthropic": "ANTHROPIC_API_KEY",
+            "openai": "OPENAI_API_KEY",
+            "ollama": "OLLAMA_BASE_URL",
+            "kimi": "KIMI_BOT_TOKEN",
+            "codex": "CODEX_API_KEY",
+        }
+
+        for provider, env_var in provider_env_map.items():
+            profile_id = resolve_profile(auth_profiles, provider=provider)
+            if profile_id is None:
+                continue
+            cred = auth_profiles.profiles[profile_id]
+            if isinstance(cred, ApiKeyCredential) and cred.key:
+                os.environ[env_var] = cred.key
+            elif isinstance(cred, TokenCredential) and cred.token:
+                os.environ[env_var] = cred.token
+            elif isinstance(cred, OAuthCredential) and cred.access_token:
+                os.environ[env_var] = cred.access_token
+
+        # OpenAI-compat needs special handling (base_url in metadata)
+        compat_id = resolve_profile(auth_profiles, provider="openai_compat")
+        if compat_id:
+            cred = auth_profiles.profiles[compat_id]
+            if isinstance(cred, ApiKeyCredential):
+                if cred.metadata.get("base_url"):
+                    os.environ["OPENAI_COMPAT_BASE_URL"] = cred.metadata["base_url"]
+                if cred.key:
+                    os.environ["OPENAI_COMPAT_API_KEY"] = cred.key
+
+    def _inject_flat_credentials(self) -> None:
+        """Inject credentials from legacy flat credential data."""
         if "anthropic" in self._data:
             api_key = self._data["anthropic"].get("api_key")
             if api_key:
                 os.environ["ANTHROPIC_API_KEY"] = api_key
 
-        # OpenAI -- SDK reads from env var
         if "openai" in self._data:
             api_key = self._data["openai"].get("api_key")
             if api_key:
                 os.environ["OPENAI_API_KEY"] = api_key
 
-        # Ollama -- base URL for model router
         if "ollama" in self._data:
             base_url = self._data["ollama"].get("base_url")
             if base_url:
                 os.environ["OLLAMA_BASE_URL"] = base_url
 
-        # Kimi -- bot token
         if "kimi" in self._data:
             api_key = self._data["kimi"].get("api_key")
             if api_key:
                 os.environ["KIMI_BOT_TOKEN"] = api_key
 
-        # Codex (ChatGPT OAuth) — inject access token, refresh if expired
         if "codex" in self._data:
             codex = self._data["codex"]
             access = codex.get("access_token", "")
@@ -216,7 +256,6 @@ class CredentialStore:
                 except Exception as exc:
                     logger.warning("Failed to refresh Codex OAuth token: %s", exc)
 
-        # OpenAI-compatible -- base URL and optional key
         if "openai_compat" in self._data:
             compat = self._data["openai_compat"]
             if compat.get("base_url"):
@@ -224,34 +263,24 @@ class CredentialStore:
             if compat.get("api_key"):
                 os.environ["OPENAI_COMPAT_API_KEY"] = compat["api_key"]
 
-        # Home Assistant
+    def _inject_services(self) -> None:
+        """Inject service credentials (HA, Paperless, Firefly, Obsidian)."""
         if "ha" in self._data:
-            from corvus.tools.ha import configure as configure_ha
-
             ha = self._data["ha"]
             if ha.get("url") and ha.get("token"):
                 configure_ha(ha_url=ha["url"], ha_token=ha["token"])
 
-        # Paperless-ngx
         if "paperless" in self._data:
-            from corvus.tools.paperless import configure as configure_paperless
-
             p = self._data["paperless"]
             if p.get("url") and p.get("token"):
                 configure_paperless(paperless_url=p["url"], paperless_token=p["token"])
 
-        # Firefly III
         if "firefly" in self._data:
-            from corvus.tools.firefly import configure as configure_firefly
-
             f = self._data["firefly"]
             if f.get("url") and f.get("token"):
                 configure_firefly(firefly_url=f["url"], firefly_token=f["token"])
 
-        # Obsidian
         if "obsidian" in self._data:
-            from corvus.tools.obsidian import configure as configure_obsidian
-
             o = self._data["obsidian"]
             if o.get("url") and o.get("token"):
                 configure_obsidian(o["url"], o["token"])
