@@ -1,6 +1,8 @@
 <script lang="ts">
 	import ModeRail from '$lib/components/ModeRail.svelte';
 	import StatusBar from '$lib/components/StatusBar.svelte';
+	import ContextMeter from '$lib/components/ContextMeter.svelte';
+	import InspectorPanel from '$lib/components/InspectorPanel.svelte';
 	import SessionSidebar from '$lib/components/SessionSidebar.svelte';
 	import AgentDirectorySidebar from '$lib/components/AgentDirectorySidebar.svelte';
 	import AgentWorkspaceShell from '$lib/components/AgentWorkspaceShell.svelte';
@@ -83,7 +85,21 @@
 	const BACKEND_DISABLED = import.meta.env.VITE_DISABLE_BACKEND === '1';
 
 	let activeMode = $state<'chat' | 'agents' | 'tasks' | 'timeline' | 'memory' | 'config'>('chat');
+	let inspectorVisible = $state(true);
 	let sidebarWidths = $state(defaultSidebarWidths());
+
+	const activeAgentInfo = $derived.by(() => {
+		const agent = currentSession.activeAgent;
+		if (!agent) return null;
+		return agentStore.agents.find((a) => a.id === agent) ?? null;
+	});
+
+	function handleGlobalKeydown(e: KeyboardEvent) {
+		if ((e.metaKey || e.ctrlKey) && e.shiftKey && e.key === 'i') {
+			e.preventDefault();
+			inspectorVisible = !inspectorVisible;
+		}
+	}
 	let initialConnectionStatus = $state(connectionStatus.value);
 	let focusedTraceCallId = $state<string | null>(null);
 	let agentCreatePending = $state(false);
@@ -560,6 +576,8 @@ async function selectWorkspaceRun(runId: string): Promise<void> {
 	}
 </script>
 
+<svelte:window onkeydown={handleGlobalKeydown} />
+
 <div class="flex flex-col h-full">
 	<ToastStack />
 	<StatusBar
@@ -569,6 +587,12 @@ async function selectWorkspaceRun(runId: string): Promise<void> {
 		costUsd={currentSession.costUsd}
 		tokensUsed={currentSession.tokensUsed}
 		contextPct={currentSession.contextPct}
+	/>
+	<ContextMeter
+		contextPct={currentSession.contextPct}
+		tokensUsed={currentSession.tokensUsed}
+		contextLimit={200000}
+		model={currentSession.selectedModel}
 	/>
 
 	<div class="flex flex-1 min-h-0">
@@ -674,6 +698,20 @@ async function selectWorkspaceRun(runId: string): Promise<void> {
 						}}
 					/>
 				{/if}
+				<InspectorPanel
+					sessionId={currentSession.id}
+					activeAgent={currentSession.activeAgent}
+					agentStatus={currentSession.agentStatus}
+					agentInfo={activeAgentInfo}
+					costUsd={currentSession.costUsd}
+					tokensUsed={currentSession.tokensUsed}
+					contextPct={currentSession.contextPct}
+					contextLimit={200000}
+					selectedModel={currentSession.selectedModel}
+					messageCount={currentSession.messages.length}
+					visible={inspectorVisible}
+					onClose={() => { inspectorVisible = false; }}
+				/>
 			</div>
 		{:else if activeMode === 'agents'}
 			<AgentWorkspaceShell

@@ -3,7 +3,9 @@ import type { AgentInfo, DispatchMode, DraftAttachment, ModelInfo } from '$lib/t
 import { getThemeContext } from '$lib/themes/context';
 import { agentSuggestionSource } from '$lib/chat/presenters';
 import { pushToast } from '$lib/chat/toasts.svelte';
+import AgentPickerStrip from './AgentPickerStrip.svelte';
 import ComposerCapabilityRail from './ComposerCapabilityRail.svelte';
+import DispatchModeToggle from './DispatchModeToggle.svelte';
 import ModelSelector from './ModelSelector.svelte';
 import SuggestionOverlay from './SuggestionOverlay.svelte';
 import RecipientPicker from './RecipientPicker.svelte';
@@ -282,6 +284,32 @@ import RecipientPicker from './RecipientPicker.svelte';
 			{onDispatchModeChange}
 			{onRecipientsChange}
 		/>
+
+		<!-- Visible dispatch mode + agent picker -->
+		<div class="flex items-center gap-2 py-1 mb-1">
+			<DispatchModeToggle mode={dispatchMode} onChange={onDispatchModeChange} />
+			{#if dispatchMode !== 'router'}
+				<AgentPickerStrip
+					agents={availableAgents}
+					{selectedRecipients}
+					{dispatchMode}
+					onToggleAgent={(agentId) => {
+						const current = [...selectedRecipients];
+						const idx = current.indexOf(agentId);
+						if (idx >= 0) {
+							current.splice(idx, 1);
+						} else {
+							if (dispatchMode === 'direct') {
+								onRecipientsChange([agentId], false);
+								return;
+							}
+							current.push(agentId);
+						}
+						onRecipientsChange(current, false);
+					}}
+				/>
+			{/if}
+		</div>
 
 		<ComposerCapabilityRail
 			attachments={stagedAttachments}
