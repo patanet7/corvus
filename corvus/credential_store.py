@@ -22,7 +22,26 @@ import subprocess
 import time
 from pathlib import Path
 
+from corvus.auth.openai_oauth import refresh_access_token
+
 logger = logging.getLogger(__name__)
+
+
+def mask_value(value: str | None, visible_chars: int = 8) -> str:
+    """Mask a credential value for safe display.
+
+    Shows the first *visible_chars* characters followed by '...'.
+    Values shorter than *visible_chars* are fully masked.
+    URLs are masked after the scheme (https://...).
+    """
+    if not value:
+        return ""
+    if value.startswith(("http://", "https://")):
+        scheme_end = value.index("://") + 3
+        return value[:scheme_end] + "..."
+    if len(value) <= visible_chars:
+        return "..."
+    return value[:visible_chars] + "..."
 
 
 class CredentialStore:
@@ -98,6 +117,14 @@ class CredentialStore:
         self._data[service][key] = value
         self._save()
 
+    def set_bulk(self, service: str, data: dict[str, str]) -> None:
+        """Set multiple keys for a service with a single encrypt cycle."""
+        if service not in self._data:
+            self._data[service] = {}
+        self._data[service].update(data)
+        if self._path is not None:
+            self._save()
+
     def delete(self, service: str) -> None:
         """Remove an entire service from the store.  No-op if missing."""
         if service not in self._data:
@@ -166,8 +193,6 @@ class CredentialStore:
                 os.environ["CODEX_API_KEY"] = access
             elif codex.get("refresh_token"):
                 try:
-                    from corvus.auth.openai_oauth import refresh_access_token
-
                     tokens = refresh_access_token(refresh_token=codex["refresh_token"])
                     self._data["codex"]["access_token"] = tokens.access_token
                     self._data["codex"]["refresh_token"] = tokens.refresh_token
