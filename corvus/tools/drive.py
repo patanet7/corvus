@@ -42,7 +42,7 @@ def configure(client: GoogleClient) -> None:
 def _get_client() -> GoogleClient:
     """Return the configured GoogleClient or raise."""
     if _client is None:
-        raise RuntimeError("Drive tools not configured. Call gateway.tools.drive.configure(client) first.")
+        raise RuntimeError("Drive tools not configured. Call corvus.tools.drive.configure(client) first.")
     return _client
 
 

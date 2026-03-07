@@ -3,7 +3,7 @@
 Implements the ACP (Agent Communication Protocol) over JSON-RPC 2.0 to
 communicate with Kimi's bridge server at wss://www.kimi.com/api-claw/bots/agent-ws.
 
-This module is the MODEL PROVIDER layer for Claw. Kimi K2 is the inference
+This module is the MODEL PROVIDER layer for Corvus. Kimi K2 is the inference
 engine -- when an agent needs to think/reason, it sends the prompt through the
 Kimi bridge to K2, and K2's response streams back. It is the equivalent of
 calling an LLM API endpoint, but over a persistent WebSocket using ACP/JSON-RPC.

@@ -223,7 +223,7 @@ def merge_with_db(
 
 
 class CronScheduler:
-    """APScheduler-backed cron scheduler for Claw scheduled tasks."""
+    """APScheduler-backed cron scheduler for Corvus scheduled tasks."""
 
     def __init__(
         self,
@@ -421,7 +421,7 @@ class CronScheduler:
     async def _dispatch_prompt(self, entry: ScheduleEntry) -> None:
         """Dispatch a prompt-type schedule to the appropriate agent.
 
-        Cross-module dependency: uses claw.webhooks._dispatch_to_agent
+        Cross-module dependency: uses corvus.webhooks._dispatch_to_agent
         (same package, acceptable coupling — both modules share the agent
         dispatch contract).
         """

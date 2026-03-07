@@ -4,7 +4,7 @@ Profiles are named credentials (e.g. 'anthropic:default', 'anthropic:backup')
 that support round-robin rotation, failure tracking, and per-agent overrides.
 All stored SOPS-encrypted in the credential store.
 
-Modeled after OpenClaw's auth profile system, with SOPS encryption at rest.
+Multi-credential profiles with SOPS encryption at rest.
 """
 
 from __future__ import annotations

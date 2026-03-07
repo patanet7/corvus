@@ -1,4 +1,4 @@
-"""Security and logging hooks for the Claw gateway.
+"""Security and logging hooks for the Corvus gateway.
 
 Uses HookMatcher from claude_agent_sdk to intercept tool calls.
 """

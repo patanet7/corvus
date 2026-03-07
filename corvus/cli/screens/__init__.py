@@ -1,1 +1,1 @@
-"""Textual screens for the Claw setup wizard."""
+"""Textual screens for the Corvus setup wizard."""

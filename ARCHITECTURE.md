@@ -1,6 +1,4 @@
-# Corvus — Architecture (formerly Claw)
-
-> **RENAME IN PROGRESS (2026-02-28):** Claw → Corvus. Code/module names still use `claw/`. Full rename is a separate task.
+# Corvus — Architecture
 
 > **Purpose of this file:** Drift prevention. Every design decision that matters is here.
 > If something contradicts this file, this file wins. Update this file first, then the code.
@@ -9,10 +7,10 @@
 
 ## System Overview
 
-Single Python process. FastAPI + WebSocket gateway wrapping the **Claude Agent SDK** (`claude-agent-sdk` on PyPI). 9 subagents (8 domain + 1 general). Skills-first tool exposure. Two-layer hybrid memory with Obsidian vault storage. Session stop hook extracts key facts on disconnect. **ACP integration** enables spawning external coding agents (Codex, Gemini CLI, etc.) as sandboxed sub-agents via the Agent Client Protocol.
+Single Python process. FastAPI + WebSocket gateway wrapping the **Claude Agent SDK** (`claude-agent-sdk` on PyPI). 10 subagents (8 domain + 1 general + 1 router/huginn). Skills-first tool exposure. Two-layer hybrid memory with Obsidian vault storage. Session stop hook extracts key facts on disconnect. **LiteLLM proxy** handles multi-backend model routing (Claude, Ollama, Kimi, OpenAI). **ACP integration** enables spawning external coding agents (Codex, Gemini CLI, etc.) as sandboxed sub-agents via the Agent Client Protocol.
 
 ```
-Internet → SWAG (optiplex) → Authelia SSO → Claw Gateway (laptop-server:18789)
+Internet → SWAG (optiplex) → Authelia SSO → Corvus Gateway (laptop-server:18789)
 ```
 
 ---
@@ -33,7 +31,7 @@ Internet → SWAG (optiplex) → Authelia SSO → Claw Gateway (laptop-server:18
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
-│                     Claw Gateway (Python)                       │
+│                     Corvus Gateway (Python)                      │
 │                                                                 │
 │  FastAPI (lifespan) ── WebSocket /ws (chat sessions)            │
 │       │                POST /api/webhooks/{type} (one-shot)     │
@@ -46,8 +44,8 @@ Internet → SWAG (optiplex) → Authelia SSO → Claw Gateway (laptop-server:18
 │  │  ModelRouter → backend selection with fallback chains      │ │
 │  │  SDKClientPool → per-backend env resolution                │ │
 │  │                                                            │ │
-│  │  9 Subagents (AgentDefinition):                            │ │
-│  │    personal · work · homelab · finance                     │ │
+│  │  10 Subagents (AgentDefinition):                           │ │
+│  │    huginn (router) · personal · work · homelab · finance   │ │
 │  │    email · docs · music · home · general                   │ │
 │  │                                                            │ │
 │  │  Hooks (HookMatcher):                                      │ │
@@ -90,7 +88,7 @@ Internet → SWAG (optiplex) → Authelia SSO → Claw Gateway (laptop-server:18
 │  ┌────▼───────────────────────────────────────────────────────┐ │
 │  │  Observability                                             │ │
 │  │                                                            │ │
-│  │  JSONLFileSink → /var/log/claw/events.jsonl → Alloy → Loki│ │
+│  │  JSONLFileSink → /var/log/corvus/events.jsonl → Alloy →Loki│ │
 │  │  Grafana dashboard: fleet health, agent activity, security,│ │
 │  │    sessions, models, webhooks                              │ │
 │  └────────────────────────────────────────────────────────────┘ │
@@ -113,18 +111,17 @@ lifespan startup:
   scheduler.load() + start() # Cron jobs activate
 ```
 
-### ToolProviderRegistry (`claw/providers/registry.py`)
+### CapabilitiesRegistry (`corvus/capabilities/registry.py`)
 
-Central registry for all external tool providers. Each provider is a `ProviderConfig` with:
+Security-enforced tool module registry. Each module is a `ToolModuleEntry` with:
 - `name` — unique identifier (e.g. `"ha"`, `"paperless"`)
-- `env_vars` — required environment variables
-- `health_check` — async callable returning `HealthStatus`
-- `create_tools` — factory for SDK tool objects
-- `restart` — optional async callable for auto-restart
+- `requires_env` — required environment variables (env gate)
+- `configure` — callable to set module-level config from env vars
+- `build_mcp_server` — factory for SDK MCP server objects
 
-Provider registration is data-driven via `_PROVIDER_DEFS` table in `server.py`. Providers are only registered when their gate env var is set.
+Module registration is data-driven via `TOOL_MODULE_DEFS` in `corvus/capabilities/modules.py`. Modules are only resolved when their env gate vars are set (deny-wins policy).
 
-### AgentSupervisor (`claw/supervisor.py`)
+### AgentSupervisor (`corvus/supervisor.py`)
 
 Monitors provider health on a 30-second heartbeat loop:
 - Calls each provider's `health_check()` and emits `heartbeat` events with `mcp_status` map
@@ -133,7 +130,7 @@ Monitors provider health on a 30-second heartbeat loop:
 - `restart_provider(name)` — public API for manual restart (resets counter)
 - `graceful_shutdown()` — cancels heartbeat task
 
-### EventEmitter (`claw/events.py`)
+### EventEmitter (`corvus/events.py`)
 
 Async event bus with pluggable sinks. Events emitted:
 - `routing_decision` — agent, backend, source (websocket/webhook), query_preview
@@ -142,19 +139,19 @@ Async event bus with pluggable sinks. Events emitted:
 - `provider_restart` — provider name + attempt number
 - `tool_use` / `tool_result` — from hooks
 
-Default sink: `JSONLFileSink` writing to `/var/log/claw/events.jsonl` (shipped to Loki via Alloy).
+Default sink: `JSONLFileSink` writing to `/var/log/corvus/events.jsonl` (shipped to Loki via Alloy).
 
-### ModelRouter (`claw/model_router.py`)
+### ModelRouter (`corvus/model_router.py`)
 
-Routes agents to LLM backends with fallback chains defined in `config/models.yaml`. `SDKClientPool` resolves the backend and builds the appropriate env vars for each SDK client.
+Routes agents to LLM backends via **LiteLLM proxy**. At startup, `LiteLLMManager` generates a `litellm_config.yaml` from `config/models.yaml` and starts a local proxy on `127.0.0.1:4000`. The `claude-agent-sdk` talks to this proxy via `ANTHROPIC_BASE_URL`. LiteLLM handles fallbacks, retries, cooldowns, and cost tracking.
 
-### CronScheduler (`claw/scheduler.py`)
+### CronScheduler (`corvus/scheduler.py`)
 
 Cron-based task scheduling with SQLite-backed state. Supports daily digests, memory maintenance, and other periodic tasks. API: `GET/PATCH /api/schedules`, `POST /api/schedules/{name}/trigger`.
 
 ### Per-Agent MCP Isolation
 
-Obsidian vault access is namespaced per agent via `AGENT_TOOL_ACCESS` config (`claw/agent_config.py`):
+Obsidian vault access is namespaced per agent via `CapabilitiesRegistry` + agent YAML specs (`config/agents/*/agent.yaml`):
 - Each agent gets its own `obsidian_{agent}` MCP server with `allowed_prefixes`
 - Personal agent: `personal/`, work agent: `work/`, etc.
 - Read/write permissions configured independently per agent
@@ -162,23 +159,22 @@ Obsidian vault access is namespaced per agent via `AGENT_TOOL_ACCESS` config (`c
 
 ---
 
-## Prompt Composition (OpenClaw-inspired)
+## Prompt Composition (6-layer)
 
 Every agent gets the same layered prompt composition — no special cases:
 
 ```
-Layer 0: Soul (shared)          ← claw/prompts/soul.md
+Layer 0: Soul (shared)          ← config/agents/soul.md (or per-agent soul_file)
          Identity + principles + memory operating instructions
-         Counteracts CLI binary's hardcoded "You are Claude" injection
 
-Layer 1: Agent Soul (per-agent) ← claw/prompts/souls/{agent}.md (via soul_file in YAML)
+Layer 1: Agent Soul (per-agent) ← config/agents/{agent}/soul.md (via soul_file in YAML)
          Personality, vibe, behavioral style
          e.g. homelab = "methodical, cautious", music = "encouraging, patient"
 
 Layer 2: Agent Identity          ← Generated from registry name
          "You are the **{name}** agent"
 
-Layer 3: Agent Prompt            ← claw/prompts/{agent}.md (via prompt_file in YAML)
+Layer 3: Agent Prompt            ← config/agents/{agent}/prompt.md (via prompt_file in YAML)
          Domain capabilities, behaviors, workflows
 
 Layer 4: Sibling Agents          ← registry.list_enabled() (excludes self)
@@ -332,7 +328,7 @@ On WebSocket disconnect, the gateway:
 ## Credential Management
 
 ```
-~/.claw/
+~/.corvus/
   credentials.json       # SOPS+age encrypted — all service credentials
   credentials.json.bak   # Previous version (rotation rollback)
   age-key.txt            # age private key (0600)
@@ -340,7 +336,7 @@ On WebSocket disconnect, the gateway:
   lockout.json           # Rate-limit state for failed passphrase attempts
 ```
 
-**CredentialStore** (`claw/credential_store.py`) decrypts `credentials.json` at startup, holds values in memory, and calls each tool module's `configure()` function. If no credential file exists, falls back to env vars (Docker compose compat).
+**CredentialStore** (`corvus/credential_store.py`) decrypts `credentials.json` at startup, injects service credentials as env vars via `SERVICE_ENV_MAP`, and tool modules read from `os.environ` in their `configure()` functions (called by `CapabilitiesRegistry.resolve()`). If no credential file exists, falls back to env vars (Docker compose compat).
 
 **Dynamic sanitization:** At startup, `sanitize.py` registers redaction patterns built from actual credential values — not just generic regex. Any credential that leaks into tool output gets caught.
 
@@ -361,7 +357,7 @@ Gateway-level privilege escalation for emergency ops. **Invisible to all agents*
 ## Security Rules (Non-Negotiable)
 
 1. PreToolUse hook blocks: `cat/head/tail/source *.env`, `Read` on `*.env`
-2. Credentials encrypted at rest via SOPS+age in `~/.claw/credentials.json`
+2. Credentials encrypted at rest via SOPS+age in `~/.corvus/credentials.json`
 3. Tool modules get credentials via `configure()` at startup — agents never see raw values
 4. Dynamic sanitization redacts actual credential values from all tool output
 5. Gmail send/archive and HA service calls require explicit user confirmation
@@ -381,7 +377,7 @@ Gateway-level privilege escalation for emergency ops. **Invisible to all agents*
 - **Auth:** Authelia trusted-proxy via SWAG on optiplex (X-Remote-User header)
 - **Data:** `/data` mounted as `/data`
 - **Vault:** `/mnt/vaults` mounted RW (Obsidian vault)
-- **Logs:** `/var/log/claw/events.jsonl` → Alloy → Loki → Grafana
+- **Logs:** `/var/log/corvus/events.jsonl` → Alloy → Loki → Grafana
 - **Limits:** 4G memory limit, 1G reservation
 
 ---

@@ -1,8 +1,8 @@
-"""Claw Gateway FastAPI composition root.
+"""Corvus Gateway FastAPI composition root.
 
 This module intentionally stays thin: it wires runtime dependencies,
 registers API routers, and exposes legacy-compatible symbols used by
-other modules (for example claw.webhooks importing build_options/emitter).
+other modules (for example corvus.webhooks importing build_options/emitter).
 """
 
 # ruff: noqa: E402, I001
@@ -171,7 +171,7 @@ async def health():
 
 
 def main():
-    """Run the Claw Gateway server."""
+    """Run the Corvus Gateway server."""
     uvicorn.run(
         "corvus.server:app",
         host=HOST,

@@ -1,7 +1,7 @@
 """Session/domain persistence facade.
 
 Public API remains stable while internals are split into repository classes
-under ``claw.sessions``.
+under ``corvus.sessions``.
 """
 
 from __future__ import annotations

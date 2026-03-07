@@ -10,7 +10,7 @@ Tools:
 Configuration:
     Call configure(paperless_url, paperless_token) before using any tool.
 
-All outputs are sanitized via claw.sanitize.sanitize() to prevent
+All outputs are sanitized via corvus.sanitize.sanitize() to prevent
 credential leakage.
 """
 
@@ -40,7 +40,7 @@ def configure(paperless_url: str, paperless_token: str) -> None:
 def _get_config() -> tuple[str, str]:
     """Return (url, token) or raise if not configured."""
     if _paperless_url is None or _paperless_token is None:
-        raise RuntimeError("Paperless tools not configured. Call claw.tools.paperless.configure(url, token) first.")
+        raise RuntimeError("Paperless tools not configured. Call corvus.tools.paperless.configure(url, token) first.")
     return _paperless_url, _paperless_token
 
 

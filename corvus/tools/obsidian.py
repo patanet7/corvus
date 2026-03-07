@@ -9,7 +9,7 @@ Tools:
 Configuration:
     Call configure(base_url, api_key) before using any tool.
 
-All outputs are sanitized via claw.sanitize.sanitize() to prevent
+All outputs are sanitized via corvus.sanitize.sanitize() to prevent
 credential leakage. All paths are validated via sanitize_path() to
 block traversal attacks.
 """

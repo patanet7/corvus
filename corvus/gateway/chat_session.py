@@ -1,6 +1,6 @@
 """ChatSession class — WebSocket chat lifecycle extracted from closure soup.
 
-Converts the deeply nested closures in claw/api/chat.py into a class with
+Converts the deeply nested closures in corvus/api/chat.py into a class with
 explicit instance state. Session-lifetime state lives on the instance;
 per-turn state is scoped via TurnContext.
 """
@@ -211,7 +211,7 @@ class ChatSession:
         )
 
     # ------------------------------------------------------------------
-    # dispatch_control_listener — ported from claw/api/chat.py lines 1059-1112
+    # dispatch_control_listener — ported from corvus/api/chat.py lines 1059-1112
     # ------------------------------------------------------------------
 
     async def dispatch_control_listener(self) -> None:
@@ -219,7 +219,7 @@ class ChatSession:
         await _dispatch_control(self)
 
     # ------------------------------------------------------------------
-    # _degraded_message_loop — ported from claw/api/chat.py lines 133-155
+    # _degraded_message_loop — ported from corvus/api/chat.py lines 133-155
     # ------------------------------------------------------------------
 
     async def _degraded_message_loop(self) -> None:

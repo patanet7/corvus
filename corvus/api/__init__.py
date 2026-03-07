@@ -1,1 +1,1 @@
-"""Claw REST API routers."""
+"""Corvus REST API routers."""

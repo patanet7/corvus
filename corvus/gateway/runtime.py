@@ -1,4 +1,4 @@
-"""Runtime wiring for the Claw gateway.
+"""Runtime wiring for the Corvus gateway.
 
 This module owns startup-time object construction (registries, hubs,
 scheduler, supervisor) so server.py can stay as a thin composition root.

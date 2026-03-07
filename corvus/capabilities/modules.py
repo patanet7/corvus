@@ -1,4 +1,4 @@
-"""Tool module registration — wires existing claw.tools.* modules into ToolModuleEntry defs.
+"""Tool module registration — wires existing corvus.tools.* modules into ToolModuleEntry defs.
 
 Each tool module gets a factory function that returns a ToolModuleEntry. The factory
 is called at module level to populate TOOL_MODULE_DEFS.

@@ -50,7 +50,7 @@ def _workspace_source_root() -> Path:
     raw = os.environ.get(_WORKSPACE_SOURCE_ENV, "").strip()
     if raw:
         return Path(raw).expanduser().resolve()
-    # claw/gateway/workspace_runtime.py -> <repo-root>
+    # corvus/gateway/workspace_runtime.py -> <repo-root>
     return Path(__file__).resolve().parents[2]
 
 

@@ -1,4 +1,4 @@
-"""Configuration loader for Claw Gateway."""
+"""Configuration loader for Corvus Gateway."""
 
 import os
 from pathlib import Path
@@ -49,17 +49,9 @@ BREAK_GLASS_MODE = os.environ.get("CORVUS_BREAK_GLASS", "").lower() in {"1", "tr
 # YAHOO_ACCOUNT_{name}_EMAIL, YAHOO_ACCOUNT_{name}_APP_PASSWORD
 # Legacy: YAHOO_EMAIL, YAHOO_APP_PASSWORD
 
-# Home Assistant (unchanged)
-HA_URL = os.environ.get("HA_URL", "")
-HA_TOKEN = os.environ.get("HA_TOKEN", "")
-
-# Paperless-ngx
-PAPERLESS_URL = os.environ.get("PAPERLESS_URL", "")
-PAPERLESS_API_TOKEN = os.environ.get("PAPERLESS_API_TOKEN", "")
-
-# Firefly III
-FIREFLY_URL = os.environ.get("FIREFLY_URL", "")
-FIREFLY_API_TOKEN = os.environ.get("FIREFLY_API_TOKEN", "")
+# Service credentials (HA, Paperless, Firefly, Obsidian) are injected at runtime
+# via SERVICE_ENV_MAP in credential_store.py → os.environ. Tool modules read
+# directly from os.environ in their configure() functions.
 
 # Scheduling
 SCHEDULES_CONFIG = Path(os.environ.get("SCHEDULES_CONFIG", "config/schedules.yaml"))
@@ -67,6 +59,6 @@ CAPABILITIES_CONFIG = Path(os.environ.get("CAPABILITIES_CONFIG", "config/capabil
 TASK_ROUTING_CONFIG = Path(os.environ.get("TASK_ROUTING_CONFIG", "config/task_routing.yaml"))
 MEMORY_CONFIG = Path(os.environ.get("MEMORY_CONFIG", "config/memory.yaml"))
 
-# Logging — /var/log/claw in Docker, .data/logs locally
+# Logging — /var/log/corvus in Docker, .data/logs locally
 LOG_DIR = Path(os.environ.get("LOG_DIR", str(DATA_DIR / "logs")))
 EVENTS_LOG = LOG_DIR / "events.jsonl"

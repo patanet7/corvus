@@ -1,45 +1,39 @@
-"""Source-contract tests: verify config.py has Paperless + Firefly settings.
+"""Source-contract tests: verify SERVICE_ENV_MAP has Paperless + Firefly settings.
 
-NO MOCKS — reads real source files to verify wiring strings are present.
+NO MOCKS — reads real source to verify wiring strings are present.
 
-Note: Tool module wiring (imports, configure, MCP server creation) moved from
-server.py to the CapabilitiesRegistry. Those are tested via the capabilities
-registry tests. Config env-var contracts are still verified here.
-
-Agent-level tool allowlists are defined in YAML config files under
-config/agents/. Confirm-gated tool sets are YAML-driven and passed dynamically
-to create_hooks(). These are tested via the agent config registry tests.
+Service credentials are injected via SERVICE_ENV_MAP in credential_store.py.
+Tool module env gates are defined in TOOL_MODULE_DEFS in capabilities/modules.py.
 """
 
-from pathlib import Path
-
-CLAW_DIR = Path(__file__).parent.parent.parent / "corvus"
+from corvus.credential_store import SERVICE_ENV_MAP
 
 
 class TestPaperlessConfig:
-    """Verify Paperless env vars are defined in config.py."""
+    """Verify Paperless env vars are in SERVICE_ENV_MAP."""
 
-    def test_config_has_paperless_url(self):
-        config_src = (CLAW_DIR / "config.py").read_text()
-        assert "PAPERLESS_URL" in config_src
+    def test_service_env_map_has_paperless(self):
+        assert "paperless" in SERVICE_ENV_MAP
 
-    def test_config_has_paperless_api_token(self):
-        config_src = (CLAW_DIR / "config.py").read_text()
-        assert "PAPERLESS_API_TOKEN" in config_src
+    def test_paperless_has_url(self):
+        assert "url" in SERVICE_ENV_MAP["paperless"]
+        assert SERVICE_ENV_MAP["paperless"]["url"] == "PAPERLESS_URL"
+
+    def test_paperless_has_token(self):
+        assert "token" in SERVICE_ENV_MAP["paperless"]
+        assert SERVICE_ENV_MAP["paperless"]["token"] == "PAPERLESS_API_TOKEN"
 
 
 class TestFireflyConfig:
-    """Verify Firefly env vars are defined in config.py."""
+    """Verify Firefly env vars are in SERVICE_ENV_MAP."""
 
-    def test_config_has_firefly_url(self):
-        config_src = (CLAW_DIR / "config.py").read_text()
-        assert "FIREFLY_URL" in config_src
+    def test_service_env_map_has_firefly(self):
+        assert "firefly" in SERVICE_ENV_MAP
 
-    def test_config_has_firefly_api_token(self):
-        config_src = (CLAW_DIR / "config.py").read_text()
-        assert "FIREFLY_API_TOKEN" in config_src
+    def test_firefly_has_url(self):
+        assert "url" in SERVICE_ENV_MAP["firefly"]
+        assert SERVICE_ENV_MAP["firefly"]["url"] == "FIREFLY_URL"
 
-
-# NOTE: TestConfirmGateCompleteness was removed — confirm-gated tools are now
-# YAML-driven and passed dynamically to create_hooks(). hooks.py no longer
-# contains any hardcoded tool names, so negative assertions are always true.
+    def test_firefly_has_token(self):
+        assert "token" in SERVICE_ENV_MAP["firefly"]
+        assert SERVICE_ENV_MAP["firefly"]["token"] == "FIREFLY_API_TOKEN"

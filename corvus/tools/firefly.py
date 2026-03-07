@@ -10,7 +10,7 @@ Tools:
 Configuration:
     Call configure(firefly_url, firefly_token) before using any tool.
 
-All outputs are sanitized via claw.sanitize.sanitize() to prevent
+All outputs are sanitized via corvus.sanitize.sanitize() to prevent
 credential leakage.
 """
 
@@ -41,7 +41,7 @@ def configure(firefly_url: str, firefly_token: str) -> None:
 def _get_config() -> tuple[str, str]:
     """Return (url, token) or raise if not configured."""
     if _firefly_url is None or _firefly_token is None:
-        raise RuntimeError("Firefly tools not configured. Call claw.tools.firefly.configure(url, token) first.")
+        raise RuntimeError("Firefly tools not configured. Call corvus.tools.firefly.configure(url, token) first.")
     return _firefly_url, _firefly_token
 
 

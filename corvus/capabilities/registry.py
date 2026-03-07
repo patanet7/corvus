@@ -2,7 +2,7 @@
 
 The registry is the security boundary for tool access. It enforces deny-wins
 policy at resolution time: if an env gate fails, the module is excluded.
-Hooks (claw/hooks.py) remain for observability/audit only.
+Hooks (corvus/hooks.py) remain for observability/audit only.
 """
 
 import logging

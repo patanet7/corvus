@@ -38,7 +38,7 @@ def configure(ha_url: str, ha_token: str) -> None:
 def _get_config() -> tuple[str, str]:
     """Return (url, token) or raise if not configured."""
     if _ha_url is None or _ha_token is None:
-        raise RuntimeError("HA tools not configured. Call gateway.tools.ha.configure(url, token) first.")
+        raise RuntimeError("HA tools not configured. Call corvus.tools.ha.configure(url, token) first.")
     return _ha_url, _ha_token
 
 

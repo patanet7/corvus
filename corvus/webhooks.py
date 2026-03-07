@@ -86,7 +86,7 @@ def _emit_routing_decision(agent: str, webhook_type: str, query_preview: str) ->
     Best-effort — never breaks webhook processing for observability.
     """
     try:
-        # Lazy import: claw.server imports claw.webhooks, so importing server
+        # Lazy import: corvus.server imports corvus.webhooks, so importing server
         # at module level creates a circular dependency.
         from corvus.server import emitter
 
