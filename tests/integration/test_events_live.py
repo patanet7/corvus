@@ -11,7 +11,11 @@ import asyncio
 import json
 from pathlib import Path
 
+import pytest
+
 from corvus.events import EventEmitter, JSONLFileSink
+
+pytestmark = [pytest.mark.integration, pytest.mark.live]
 
 
 def run(coro):

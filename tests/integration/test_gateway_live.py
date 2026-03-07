@@ -1,4 +1,4 @@
-"""LIVE integration tests for the Claw Gateway server.
+"""LIVE integration tests for the Corvus Gateway server.
 
 NO mocks. Real FastAPI TestClient, real SQLite, real event pipeline.
 Tests verify the server actually starts, endpoints respond, and
@@ -13,6 +13,8 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 from starlette.websockets import WebSocketDisconnect
+
+pytestmark = [pytest.mark.integration, pytest.mark.live]
 
 
 @pytest.fixture(autouse=True)

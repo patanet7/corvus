@@ -8,6 +8,8 @@ import os
 
 import pytest
 
+pytestmark = [pytest.mark.integration, pytest.mark.live]
+
 HAS_API_KEY = bool(os.environ.get("ANTHROPIC_API_KEY"))
 
 

@@ -15,6 +15,8 @@ import yaml
 from scripts.common.memory_engine import MemoryEngine, SearchResult, init_db
 from scripts.common.vault_writer import VaultWriter
 
+pytestmark = pytest.mark.integration
+
 
 # Use a real temp directory that persists for the test session
 @pytest.fixture(scope="session")

@@ -21,6 +21,8 @@ from corvus.memory.toolkit import create_memory_toolkit
 from tests.conftest import make_hub, run
 from tests.integration.conftest import skip_no_llm
 
+pytestmark = [pytest.mark.integration, pytest.mark.live]
+
 
 class TestMemoryRecord:
     """Verify MemoryRecord dataclass shape and serialization."""

@@ -28,6 +28,8 @@ from corvus.session import (
 )
 from tests.conftest import make_hub, run
 
+pytestmark = pytest.mark.integration
+
 ROOT = Path(__file__).parent.parent.parent
 
 

@@ -17,6 +17,8 @@ from corvus.capabilities.registry import CapabilitiesRegistry, ModuleHealth, Too
 from corvus.events import EventEmitter, JSONLFileSink
 from corvus.supervisor import AgentSupervisor
 
+pytestmark = [pytest.mark.integration, pytest.mark.live]
+
 
 def run(coro):
     """Helper to run async functions in sync tests."""

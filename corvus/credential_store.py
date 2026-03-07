@@ -22,8 +22,6 @@ import subprocess
 import time
 from pathlib import Path
 
-from importlib import import_module
-
 from corvus.auth.openai_oauth import refresh_access_token
 from corvus.auth.profile_resolver import resolve_profile
 from corvus.auth.profiles import (
@@ -36,19 +34,23 @@ from corvus.auth.profiles import (
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
-# Service tool registry — maps credential store keys to tool configure calls.
+# Service environment variable map — single source of truth for the mapping
+# between credential store field names and the env vars that TOOL_MODULE_DEFS
+# (corvus/capabilities/modules.py) reads at resolve time.
 #
-# Each entry: (service_key, module_path, configure_func_name, arg_mapping)
-# arg_mapping: {credential_field: kwarg_name_for_configure}
+# Used by:
+#   - inject() → _inject_service_env_vars(): set env vars from SOPS credentials
+#   - from_env(): populate credential store from env vars (Docker/CI)
 #
-# To add a new service tool, add an entry here. No other code changes needed.
+# To add a new service, add an entry here AND a ToolModuleEntry in modules.py.
 # ---------------------------------------------------------------------------
-SERVICE_TOOL_REGISTRY: list[tuple[str, str, str, dict[str, str]]] = [
-    ("ha", "corvus.tools.ha", "configure", {"url": "ha_url", "token": "ha_token"}),
-    ("paperless", "corvus.tools.paperless", "configure", {"url": "paperless_url", "token": "paperless_token"}),
-    ("firefly", "corvus.tools.firefly", "configure", {"url": "firefly_url", "token": "firefly_token"}),
-    ("obsidian", "corvus.tools.obsidian", "configure", {"url": "base_url", "token": "api_key"}),
-]
+SERVICE_ENV_MAP: dict[str, dict[str, str]] = {
+    "ha": {"url": "HA_URL", "token": "HA_TOKEN"},
+    "paperless": {"url": "PAPERLESS_URL", "token": "PAPERLESS_API_TOKEN"},
+    "firefly": {"url": "FIREFLY_URL", "token": "FIREFLY_API_TOKEN"},
+    "obsidian": {"url": "OBSIDIAN_URL", "token": "OBSIDIAN_API_KEY"},
+    "google": {"creds_path": "GOOGLE_CREDS_PATH"},
+}
 
 
 def mask_value(value: str | None, visible_chars: int = 8) -> str:
@@ -191,7 +193,7 @@ class CredentialStore:
             self._inject_from_profiles(auth_profiles)
         else:
             self._inject_flat_credentials()
-        self._inject_services()
+        self._inject_service_env_vars()
 
     def _inject_from_profiles(self, auth_profiles: AuthProfileStore) -> None:
         """Inject credentials from auth profiles into environment."""
@@ -276,22 +278,16 @@ class CredentialStore:
             if compat.get("api_key"):
                 os.environ["OPENAI_COMPAT_API_KEY"] = compat["api_key"]
 
-    def _inject_services(self) -> None:
-        """Inject service credentials using the service tool registry."""
-        for svc_key, module_path, func_name, arg_mapping in SERVICE_TOOL_REGISTRY:
+    def _inject_service_env_vars(self) -> None:
+        """Set service env vars so TOOL_MODULE_DEFS can read them at resolve time."""
+        for svc_key, field_map in SERVICE_ENV_MAP.items():
             if svc_key not in self._data:
                 continue
             svc_data = self._data[svc_key]
-            # All credential fields must be present
-            if not all(svc_data.get(field) for field in arg_mapping):
-                continue
-            try:
-                module = import_module(module_path)
-                configure_fn = getattr(module, func_name)
-                kwargs = {kwarg: svc_data[field] for field, kwarg in arg_mapping.items()}
-                configure_fn(**kwargs)
-            except Exception as exc:
-                logger.warning("Failed to configure %s: %s", svc_key, exc)
+            for field, env_var in field_map.items():
+                val = svc_data.get(field)
+                if val:
+                    os.environ[env_var] = val
 
     @classmethod
     def from_env(cls) -> CredentialStore:
@@ -310,10 +306,8 @@ class CredentialStore:
         store._age_key_file = ""
         store._data = {}
 
-        env_map = {
-            "ha": {"url": "HA_URL", "token": "HA_TOKEN"},
-            "paperless": {"url": "PAPERLESS_URL", "token": "PAPERLESS_API_TOKEN"},
-            "firefly": {"url": "FIREFLY_URL", "token": "FIREFLY_API_TOKEN"},
+        env_map: dict[str, dict[str, str]] = {
+            **SERVICE_ENV_MAP,
             "anthropic": {"api_key": "ANTHROPIC_API_KEY"},
             "openai": {"api_key": "OPENAI_API_KEY"},
             "ollama": {"base_url": "OLLAMA_BASE_URL"},
