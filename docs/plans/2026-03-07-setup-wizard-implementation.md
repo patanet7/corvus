@@ -260,8 +260,9 @@ from corvus.credential_store import mask_value
 # fields: list of (field_key, placeholder, is_password)
 
 LLM_BACKENDS = [
-    ("claude", "Anthropic Claude", "api_key", [
+    ("claude", "Anthropic Claude", "claude_multi", [
         ("api_key", "API key (sk-ant-...)", True),
+        ("setup_token", "Setup token (from claude setup-token)", True),
     ]),
     ("openai", "OpenAI", "api_key", [
         ("api_key", "API key (sk-...)", True),
