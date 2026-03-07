@@ -30,6 +30,29 @@ class CorvusSetupApp(App):
     Screen {
         background: $surface;
     }
+    Header {
+        dock: top;
+        background: $primary;
+    }
+    Footer {
+        dock: bottom;
+    }
+    Button {
+        margin: 0 1;
+    }
+    Button.-primary {
+        background: $primary;
+    }
+    .section-header {
+        text-style: bold;
+        color: $accent;
+        padding: 1 0 0 1;
+    }
+    .section-panel {
+        border: round $primary;
+        padding: 0 1;
+        margin: 0 1 1 1;
+    }
     """
 
     def __init__(self, config_dir: Path | None = None, **kwargs) -> None:

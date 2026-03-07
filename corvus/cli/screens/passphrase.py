@@ -31,6 +31,31 @@ def _check_strength(passphrase: str) -> tuple[int, str]:
 class PassphraseScreen(Screen):
     """Passphrase input with strength checking and confirmation."""
 
+    DEFAULT_CSS = """
+    PassphraseScreen {
+        align: center middle;
+    }
+    #title {
+        text-style: bold;
+        color: $accent;
+        padding: 1 0 0 1;
+    }
+    #passphrase-input, #confirm-input {
+        margin: 0 1;
+    }
+    #strength-label {
+        color: $warning;
+        padding: 0 1;
+    }
+    #match-label {
+        color: $success;
+        padding: 0 1;
+    }
+    #back-btn, #finish-btn, #skip-btn {
+        margin: 1 1 0 1;
+    }
+    """
+
     BINDINGS = [("escape", "app.pop_screen", "Back")]
 
     def compose(self) -> ComposeResult:

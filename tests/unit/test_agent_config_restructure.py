@@ -6,7 +6,6 @@ import pytest
 import yaml
 
 from corvus.agents.registry import AgentRegistry
-from corvus.agents.spec import AgentSpec
 
 
 @pytest.fixture()

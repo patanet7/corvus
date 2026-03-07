@@ -6,7 +6,6 @@ import pytest
 
 from corvus.agents.registry import AgentRegistry
 
-
 EXPECTED_AGENTS = [
     "docs",
     "email",
