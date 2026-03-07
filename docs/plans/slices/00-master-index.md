@@ -53,7 +53,7 @@ These must be fixed before any open-source exposure or production trust.
 
 | Task | Status | Detail |
 |------|--------|--------|
-| **Wire confirm gate to SDK** | NOT DONE (falsely implied complete in 10B) | `chat_session.py:1389` has `# TODO: Wire to SDK confirm gate`. Frontend sends confirmations, they're persisted, but tool execution proceeds regardless. Email send, email archive, HA service calls execute WITHOUT user approval. This undermines the entire security model for gated tools. |
+| **Wire confirm gate to SDK** | DONE (verified 2026-03-07) | Fully wired: `options.py:318-340` sends `confirm_request` via WS, blocks on `ConfirmQueue.wait_for_confirmation()`, returns `PermissionResultDeny` on denial/timeout. Frontend handles `confirm_request`/`confirm_response` in protocol layer. `chat_session.py` creates `ConfirmQueue` per session, `dispatch_orchestrator.py` cancels pending on disconnect. |
 | **Add auth to schedule endpoints** | NOT DONE | `corvus/api/schedules.py` has NO `Depends(get_user)`. Anyone who can reach the gateway can list, modify, or trigger schedules. |
 | **Fix duplicate route** | NOT DONE | Both `sessions.py` and `control.py` register `GET /api/dispatch/active`. The `sessions.py` version has a lazy import from `corvus.server` creating circular dependency risk. |
 | **Webhook secret timing-safe comparison** | Not verified | `verify_webhook_secret()` should use `hmac.compare_digest()` to prevent timing attacks. Audit and fix if needed. |
@@ -102,7 +102,7 @@ Making agents truly autonomous, evolving, and independently capable.
 
 | Task | Status | Priority | Detail |
 |------|--------|----------|--------|
-| Extract confirm gate handler | NOT DONE | P0 | Currently a TODO stub. Extract into dedicated module with proper SDK wiring. |
+| Extract confirm gate handler | DONE (verified 2026-03-07) | ~~P0~~ | Fully wired via `ConfirmQueue` + `options.py` `can_use_tool` callback. Sends WS `confirm_request`, blocks, respects deny/timeout. |
 | Extract dispatch orchestrator | Not started | P1 | `execute_dispatch_runs` and parallel fan-out logic should be a separate `DispatchOrchestrator` class. |
 | Extract event persistence | Not started | P2 | Session/run/trace event persistence methods should be a separate `EventPersistence` class. |
 | Extract WebSocket protocol | Not started | P2 | Message loop, ping/pong, init handshake into `WSProtocol` class. |
@@ -289,7 +289,7 @@ Each item is independently deliverable.
 
 | File | TODO | Priority |
 |------|------|----------|
-| `corvus/gateway/chat_session.py:1389` | Wire SDK confirm gate — **SECURITY CRITICAL** | P0 |
+| `corvus/gateway/chat_session.py` | ~~Wire SDK confirm gate~~ — **DONE** (wired via `options.py` + `ConfirmQueue`) | ~~P0~~ |
 | `corvus/api/schedules.py` | Add `Depends(get_user)` auth — **SECURITY** | P0 |
 | `corvus/api/sessions.py:164` | Remove duplicate `GET /api/dispatch/active` route | P0 |
 | `corvus/memory/hub.py:258` | MMR diversity re-ranking (config exists, not used) | P2 |
