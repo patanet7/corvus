@@ -9,7 +9,7 @@
 
 ## System Overview
 
-Single Python process. FastAPI + WebSocket gateway wrapping the **Claude Agent SDK** (`claude-agent-sdk` on PyPI). 9 subagents (8 domain + 1 general). Skills-first tool exposure. Two-layer hybrid memory with Obsidian vault storage. Session stop hook extracts key facts on disconnect.
+Single Python process. FastAPI + WebSocket gateway wrapping the **Claude Agent SDK** (`claude-agent-sdk` on PyPI). 9 subagents (8 domain + 1 general). Skills-first tool exposure. Two-layer hybrid memory with Obsidian vault storage. Session stop hook extracts key facts on disconnect. **ACP integration** enables spawning external coding agents (Codex, Gemini CLI, etc.) as sandboxed sub-agents via the Agent Client Protocol.
 
 ```
 Internet → SWAG (optiplex) → Authelia SSO → Claw Gateway (laptop-server:18789)
@@ -53,6 +53,19 @@ Internet → SWAG (optiplex) → Authelia SSO → Claw Gateway (laptop-server:18
 │  │  Hooks (HookMatcher):                                      │ │
 │  │    PreToolUse  → block .env reads, enforce tool policy     │ │
 │  │    PostToolUse → sanitize output, structured event logs    │ │
+│  └────────────────────────────────────────────────────────────┘ │
+│       │                                                         │
+│  ┌────▼───────────────────────────────────────────────────────┐ │
+│  │  ACP Agent Bridge (CorvusACPClient)                       │ │
+│  │                                                            │ │
+│  │  AcpAgentRegistry → config-driven agent commands           │ │
+│  │  AcpSessionTracker → session IDs, PIDs, resume state      │ │
+│  │  JSON-RPC 2.0 over stdio → Codex, Gemini, OpenCode, etc. │ │
+│  │                                                            │ │
+│  │  7-layer enforcement:                                      │ │
+│  │    L1 env strip · L2 workspace jail · L3 file gating      │ │
+│  │    L4 terminal gating · L5 policy enforcement              │ │
+│  │    L6 output sanitize · L7 process sandbox (no network)   │ │
 │  └────────────────────────────────────────────────────────────┘ │
 │       │                                                         │
 │  ┌────▼───────────────────────────────────────────────────────┐ │
@@ -244,6 +257,68 @@ Audit trail: all `save`/`forget` operations logged to `memory_audit` table.
 
 **All agents** get per-agent `memory_{agent}` MCP servers with `memory_search`/`memory_save`/`memory_get`/`memory_list`/`memory_forget` tools. Domain isolation enforced via closure-captured identity.
 
+---
+
+## ACP Agent Integration
+
+External coding agents (Codex CLI, Gemini CLI, OpenCode, Claude Code) can be spawned as sandboxed sub-agents via the **Agent Client Protocol** (ACP) — a JSON-RPC 2.0 bidirectional protocol over stdio, created by Zed Industries.
+
+### How It Works
+
+ACP is a **second execution path** alongside the Claude Agent SDK. When a domain agent's spec declares `backend: acp`, the run executor spawns the configured ACP agent as a child process instead of using `ClaudeSDKClient`. Corvus acts as the ACP **client** — it controls the agent's file access, terminal commands, and permissions.
+
+```
+Router dispatch → backend: acp → CorvusACPClient
+    → spawn codex-acp subprocess (stdio pipes)
+    → initialize → session/new → session/prompt
+    → agent streams session/update notifications
+    → agent requests fs/read, fs/write, terminal/create → we serve or deny
+    → prompt completes → same run_complete event as Claude path
+```
+
+### Security Model
+
+ACP agents inherit a **restricted subset** of their parent agent's permissions (intersection, never union). 7-layer defense-in-depth:
+
+| Layer | Mechanism | Blocks |
+|-------|-----------|--------|
+| L1 | Env stripping (no secrets in process env) | Secret exfiltration via env/printenv |
+| L2 | Workspace jail (sandboxed cwd) | Host filesystem access |
+| L3 | File gating (path validation + CapabilityRegistry) | Traversal attacks, secret files |
+| L4 | Terminal gating (blocklist + always confirm-gated) | Dangerous commands, exfiltration |
+| L5 | Permission policy (deny-wins via CapabilityRegistry) | Privilege escalation |
+| L6 | Output sanitization (redact secrets in responses) | Data leakage via agent output |
+| L7 | Process sandbox (no network, restricted PATH) | Rogue subprocesses, reverse shells |
+
+### Observability
+
+ACP `session/update` notifications translate to the same Corvus WebSocket event types (`run_output_chunk`, `tool_use`, `tool_result`, `thinking`, `confirm_request`). The frontend displays ACP agent activity identically to Claude agent activity — full traces, tool calls, streaming text.
+
+### Configuration
+
+ACP agents are registered in `config/acp_agents.yaml`. Domain agents opt in via their spec:
+
+```yaml
+# config/agents/homelab/agent.yaml
+backend: acp
+metadata:
+  acp_agent: codex
+```
+
+### Key Components
+
+| Component | Location |
+|-----------|----------|
+| `CorvusACPClient` | `corvus/acp/client.py` |
+| `AcpAgentRegistry` | `corvus/acp/registry.py` |
+| `AcpSessionTracker` | `corvus/acp/session.py` |
+| ACP execution path | `corvus/gateway/run_executor.py` |
+| Agent commands | `config/acp_agents.yaml` |
+
+> Full design: `docs/plans/2026-03-06-corvus-cli-unified-isolation-design.md`
+
+---
+
 ### Session Stop Hook
 
 On WebSocket disconnect, the gateway:
@@ -292,6 +367,10 @@ Gateway-level privilege escalation for emergency ops. **Invisible to all agents*
 5. Gmail send/archive and HA service calls require explicit user confirmation
 6. Docker socket mounted for homelab ops — group_add `988` (docker GID)
 7. Break-glass mode is invisible to agents — gateway-only, passphrase-protected, rate-limited
+8. ACP sub-agents inherit restricted subset of parent agent's permissions (intersection, never union)
+9. ACP sub-agents never get credential_store access, secret access, or break-glass elevation
+10. ACP sub-agent processes run with no network access (unshare/sandbox-exec) and restricted PATH
+11. All ACP file operations validated against workspace boundary; all terminal commands always confirm-gated
 
 ---
 
@@ -309,6 +388,7 @@ Gateway-level privilege escalation for emergency ops. **Invisible to all agents*
 
 ## What Is NOT In This System
 
-- No Node.js, no TypeScript runtime (backend is 100% Python)
+- No Node.js, no TypeScript runtime (backend is 100% Python; ACP agents are spawned as external processes via `npx` but Corvus code is 100% Python)
 - No sqlite-vec, no llama-cpp-python, no local embedding models
-- No inter-agent delegation (agents redirect via sibling list, don't dispatch directly)
+- No direct inter-agent delegation between Corvus domain agents (agents redirect via sibling list); ACP sub-agents are dispatched by the gateway, not by other agents
+- No Corvus-as-ACP-agent (exposing Corvus to external editors) — future work
