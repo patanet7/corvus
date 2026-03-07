@@ -18,6 +18,19 @@ import uuid
 logger = logging.getLogger("corvus-cli")
 
 
+def _create_keybindings() -> "KeyBindings":
+    """Create key bindings with Escape to interrupt."""
+    from prompt_toolkit.key_binding import KeyBindings
+
+    kb = KeyBindings()
+
+    @kb.add("escape")
+    def _(event: object) -> None:
+        event.app.exit(exception=KeyboardInterrupt)  # type: ignore[attr-defined]
+
+    return kb
+
+
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     """Parse CLI arguments for corvus chat."""
     parser = argparse.ArgumentParser(
@@ -72,9 +85,13 @@ def _pick_agent_interactive(runtime: object) -> str:
     welcome_data = [(a.name, a.description.strip()) for a in agents]
     print(render_welcome(welcome_data))
 
+    from prompt_toolkit import PromptSession
+
+    picker_session = PromptSession(key_bindings=_create_keybindings())
+
     while True:
         try:
-            choice = input("  Agent: ").strip()
+            choice = picker_session.prompt("  Agent: ").strip()
         except (EOFError, KeyboardInterrupt):
             print()
             sys.exit(0)
@@ -223,9 +240,17 @@ async def _repl(runtime: object, args: argparse.Namespace) -> None:
 
     client = ClaudeSDKClient(opts, **client_kwargs)
 
+    from prompt_toolkit import PromptSession
+    from prompt_toolkit.history import InMemoryHistory
+
+    repl_session = PromptSession(
+        history=InMemoryHistory(),
+        key_bindings=_create_keybindings(),
+    )
+
     while True:
         try:
-            user_input = input(
+            user_input = repl_session.prompt(
                 f"\n  {format_agent_name(agent_name)} > "
             ).strip()
         except (EOFError, KeyboardInterrupt):
