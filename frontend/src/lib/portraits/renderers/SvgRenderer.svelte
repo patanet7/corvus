@@ -6,7 +6,7 @@
 		asset: Extract<AssetDef, { type: 'svg' }>;
 		size: number;
 		agentColor: string;
-		status?: AgentStatus;
+		status?: string;
 		motionStyle?: 'smooth' | 'stepped';
 	}
 

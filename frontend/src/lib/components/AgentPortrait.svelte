@@ -8,9 +8,11 @@
 	import SpriteRenderer from '$lib/portraits/renderers/SpriteRenderer.svelte';
 	import AnimatedRenderer from '$lib/portraits/renderers/AnimatedRenderer.svelte';
 
+	type PortraitStatus = AgentStatus | 'awaiting_confirmation';
+
 	interface Props {
 		agent: string;
-		status?: AgentStatus;
+		status?: PortraitStatus;
 		size?: 'sm' | 'md' | 'lg';
 	}
 
@@ -46,9 +48,13 @@
 				? 'portrait-thinking'
 				: status === 'streaming'
 					? 'portrait-streaming'
-					: status === 'error'
-						? 'portrait-error'
-						: ''
+					: status === 'done'
+						? 'portrait-done'
+						: status === 'error'
+							? 'portrait-error'
+							: status === 'awaiting_confirmation'
+								? 'portrait-awaiting-confirm'
+								: ''
 	);
 	const motionStyle = $derived(themeCtx?.theme?.animations?.portraitStyle ?? 'smooth');
 	const motionClass = $derived(motionStyle === 'stepped' ? 'motion-stepped' : 'motion-smooth');
@@ -146,18 +152,34 @@
 		justify-content: center;
 	}
 
-	/* Status animations */
+	/* ============================
+	   Status Animations — 6 states
+	   ============================ */
 
+	/* 1. IDLE — gentle ambient glow breathing */
 	.portrait-idle {
 		animation: idle-pulse var(--duration-breathing, 4000ms) var(--ease-in-out-sine) infinite;
 	}
 
+	/* 2. THINKING — sonar rings radiating outward */
 	.portrait-thinking {
-		animation: thinking-ring var(--duration-thinking, 1500ms) var(--ease-in-out-sine) infinite;
+		animation: thinking-sonar var(--duration-thinking, 1500ms) var(--ease-in-out-sine) infinite;
 	}
 
+	/* 3. STREAMING — rotating data-flow arc + glow */
 	.portrait-streaming {
-		box-shadow: 0 0 8px color-mix(in srgb, var(--agent-color) 30%, transparent);
+		box-shadow: 0 0 8px color-mix(in srgb, var(--agent-color) 40%, transparent);
+	}
+
+	.portrait-streaming::before {
+		content: '';
+		position: absolute;
+		inset: -3px;
+		border-radius: inherit;
+		border: 2px solid transparent;
+		border-top-color: var(--agent-color);
+		animation: stream-arc 1.2s linear infinite;
+		pointer-events: none;
 	}
 
 	.portrait-streaming::after {
@@ -172,8 +194,24 @@
 		animation: dot-pulse 1s var(--ease-in-out-sine) infinite;
 	}
 
+	/* 4. DONE — brief success flash + checkmark badge */
+	.portrait-done {
+		animation: done-flash 2s ease-out forwards;
+	}
+
+	.portrait-done::after {
+		content: '';
+		position: absolute;
+		inset: 0;
+		border-radius: var(--frame-radius, var(--radius-default));
+		background: color-mix(in srgb, var(--color-success) 20%, transparent);
+		animation: done-fade 2s ease-out forwards;
+		pointer-events: none;
+	}
+
+	/* 5. ERROR — red pulse + shake */
 	.portrait-error {
-		animation: error-shake var(--duration-slow) ease-out;
+		animation: error-shake 400ms ease-out;
 	}
 
 	.portrait-error::before {
@@ -185,12 +223,45 @@
 		pointer-events: none;
 	}
 
+	/* 6. AWAITING CONFIRMATION — amber pulse with attention badge */
+	.portrait-awaiting-confirm {
+		animation: confirm-pulse 1s ease-in-out infinite;
+	}
+
+	.portrait-awaiting-confirm::after {
+		content: '!';
+		position: absolute;
+		top: -2px;
+		right: -2px;
+		width: 12px;
+		height: 12px;
+		border-radius: 50%;
+		background: var(--color-warning);
+		color: var(--color-canvas);
+		font-size: 8px;
+		font-weight: bold;
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		line-height: 1;
+		z-index: 1;
+	}
+
+	/* Stepped animation variants for retro/tactical themes */
 	.motion-stepped.portrait-idle {
 		animation-timing-function: steps(6, end);
 	}
-
 	.motion-stepped.portrait-thinking {
 		animation-timing-function: steps(8, end);
+	}
+	.motion-stepped.portrait-done {
+		animation-timing-function: steps(4, end);
+	}
+	.motion-stepped.portrait-awaiting-confirm {
+		animation-timing-function: steps(4, end);
+	}
+	.motion-stepped.portrait-streaming::before {
+		animation-timing-function: steps(12, end);
 	}
 
 	/* Glow effect from theme */
@@ -198,69 +269,70 @@
 		box-shadow: var(--frame-glow);
 	}
 
-	/* But streaming overrides glow with its own box-shadow */
+	/* Streaming overrides glow with its own box-shadow */
 	.portrait-streaming[style*='--frame-glow'] {
-		box-shadow: 0 0 8px color-mix(in srgb, var(--agent-color) 30%, transparent);
+		box-shadow: 0 0 8px color-mix(in srgb, var(--agent-color) 40%, transparent);
 	}
+
+	/* ============================
+	   Keyframes
+	   ============================ */
 
 	@keyframes idle-pulse {
-		0%,
-		100% {
-			opacity: 1;
-		}
-		50% {
-			opacity: 0.85;
-		}
+		0%, 100% { opacity: 1; transform: scale(1); }
+		50% { opacity: 0.85; transform: scale(1.02); }
 	}
 
-	@keyframes thinking-ring {
-		0%,
-		100% {
-			box-shadow: 0 0 0 2px transparent;
-		}
-		50% {
-			box-shadow: 0 0 0 2px color-mix(in srgb, var(--agent-color) 40%, transparent);
-		}
+	@keyframes thinking-sonar {
+		0% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--agent-color) 30%, transparent); }
+		70% { box-shadow: 0 0 0 6px color-mix(in srgb, var(--agent-color) 0%, transparent); }
+		100% { box-shadow: 0 0 0 0 transparent; }
+	}
+
+	@keyframes stream-arc {
+		0% { transform: rotate(0deg); }
+		100% { transform: rotate(360deg); }
 	}
 
 	@keyframes dot-pulse {
-		0%,
-		100% {
-			opacity: 1;
-			transform: scale(1);
-		}
-		50% {
-			opacity: 0.5;
-			transform: scale(0.7);
-		}
+		0%, 100% { opacity: 1; transform: scale(1); }
+		50% { opacity: 0.5; transform: scale(0.7); }
+	}
+
+	@keyframes done-flash {
+		0% { box-shadow: 0 0 12px color-mix(in srgb, var(--color-success) 50%, transparent); }
+		100% { box-shadow: none; }
+	}
+
+	@keyframes done-fade {
+		0% { opacity: 1; }
+		100% { opacity: 0; }
 	}
 
 	@keyframes error-shake {
-		0%,
-		100% {
-			transform: translateX(0);
-		}
-		20% {
-			transform: translateX(-2px);
-		}
-		40% {
-			transform: translateX(2px);
-		}
-		60% {
-			transform: translateX(-2px);
-		}
-		80% {
-			transform: translateX(1px);
-		}
+		0%, 100% { transform: translateX(0); }
+		20% { transform: translateX(-2px); }
+		40% { transform: translateX(2px); }
+		60% { transform: translateX(-2px); }
+		80% { transform: translateX(1px); }
+	}
+
+	@keyframes confirm-pulse {
+		0%, 100% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--color-warning) 40%, transparent); }
+		50% { box-shadow: 0 0 0 4px color-mix(in srgb, var(--color-warning) 0%, transparent); }
 	}
 
 	@media (prefers-reduced-motion: reduce) {
 		.portrait-idle,
 		.portrait-thinking,
-		.portrait-error {
+		.portrait-error,
+		.portrait-done,
+		.portrait-awaiting-confirm {
 			animation: none;
 		}
-		.portrait-streaming::after {
+		.portrait-streaming::before,
+		.portrait-streaming::after,
+		.portrait-done::after {
 			animation: none;
 		}
 	}
