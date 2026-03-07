@@ -28,3 +28,8 @@ memory:
   readable_domains: null
   can_read_shared: true
   can_write: true
+
+metadata:
+  shared_skills:
+    - memory
+    - obsidian

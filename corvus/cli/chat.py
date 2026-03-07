@@ -222,8 +222,9 @@ def _build_claude_cmd(
     # --- Isolation flags ---
     # Only use MCP servers we explicitly pass, ignore global configs
     cmd.append("--strict-mcp-config")
-    # Disable slash commands/skills from user-global plugins
-    cmd.append("--disable-slash-commands")
+    # Only load project-level settings (blocks user-level plugins/skills)
+    # Agent-specific skills are loaded from the isolated HOME/.claude/skills/
+    cmd.extend(["--setting-sources", "project"])
 
     # System prompt — full 6-layer composition (soul, agent soul, identity,
     # prompt, siblings, memory context)
