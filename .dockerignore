@@ -11,3 +11,4 @@ frontend/storybook-static/
 __pycache__/
 .env
 .env.*
+!.env.example
