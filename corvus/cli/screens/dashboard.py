@@ -13,6 +13,9 @@ from textual.widget import Widget
 from textual.widgets import Button, Footer, Header, Label, Static
 
 from corvus.break_glass import BreakGlassManager
+from corvus.cli.screens.custom_modal import CustomModal
+from corvus.cli.screens.oauth_modal import OAuthModal
+from corvus.cli.screens.provider_modal import ProviderModal
 from corvus.credential_store import mask_value
 
 # Provider definitions: (id, label, auth_type, fields)
@@ -263,9 +266,62 @@ class DashboardScreen(Screen):
             self._open_custom_modal("service")
 
     def _open_edit_modal(self, provider_id: str) -> None:
-        """Open the edit/setup modal for a provider. Wired in Task 9."""
-        pass
+        """Open the edit/setup modal for a provider."""
+        all_providers = LLM_BACKENDS + SERVICES
+        for pid, label, auth_type, fields in all_providers:
+            if pid == provider_id:
+                if auth_type == "oauth":
+                    def _on_oauth_result(tokens, _pid=pid) -> None:
+                        if tokens is not None:
+                            self.app.save_oauth_tokens(_pid, tokens)
+                            self._refresh_row(_pid, "authenticated", "Authenticated")
+
+                    self.app.push_screen(
+                        OAuthModal(provider_id=pid, label=label),
+                        callback=_on_oauth_result,
+                    )
+                else:
+                    store_key = "anthropic" if pid == "claude" else pid
+                    existing = self._credential_data.get(store_key, {})
+
+                    def _on_provider_result(result, _sk=store_key, _pid=pid, _fields=fields) -> None:
+                        if result is not None:
+                            self.app.save_provider_credentials(_sk, result)
+                            first_val = next(
+                                (result[k] for k, _, _ in _fields if result.get(k)),
+                                "",
+                            )
+                            self._refresh_row(_pid, "configured", mask_value(first_val))
+
+                    self.app.push_screen(
+                        ProviderModal(
+                            provider_id=pid,
+                            store_key=store_key,
+                            label=label,
+                            fields=fields,
+                            existing_data=existing,
+                        ),
+                        callback=_on_provider_result,
+                    )
+                return
 
     def _open_custom_modal(self, section: str) -> None:
-        """Open the add custom provider/service modal. Wired in Task 9."""
-        pass
+        """Open the add custom provider/service modal."""
+        def _on_custom_result(result) -> None:
+            if result is not None:
+                self.app.save_custom_provider(result)
+
+        self.app.push_screen(
+            CustomModal(section=section),
+            callback=_on_custom_result,
+        )
+
+    def _refresh_row(self, provider_id: str, status: str, masked_value: str) -> None:
+        """Update a provider row's display after save."""
+        try:
+            row = self.query_one(f"#row-{provider_id}", ProviderRow)
+            row.status = status
+            row.masked_value = masked_value
+            row.refresh()
+        except Exception:
+            pass
