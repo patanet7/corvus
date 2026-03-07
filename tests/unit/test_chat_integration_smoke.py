@@ -13,7 +13,7 @@ def test_chat_help_exits_zero() -> None:
         timeout=10,
     )
     assert result.returncode == 0
-    assert "Interactive terminal REPL" in result.stdout
+    assert "Launch Claude Code CLI" in result.stdout
 
 
 def test_chat_module_imports() -> None:

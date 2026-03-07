@@ -278,10 +278,8 @@ import RecipientPicker from './RecipientPicker.svelte';
 	<div class="mx-auto relative" style="max-width: {chatMaxWidth};">
 		<RecipientPicker
 			{availableAgents}
-			{dispatchMode}
 			selectedRecipients={selectedRecipients}
 			sendToAll={sendToAllRecipients}
-			{onDispatchModeChange}
 			{onRecipientsChange}
 		/>
 

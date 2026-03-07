@@ -1,45 +1,38 @@
-"""corvus chat -- interactive terminal REPL for Corvus agents.
+"""corvus chat -- launch Claude Code CLI with Corvus agent configuration.
 
 Entry point: ``uv run python -m corvus.cli.chat``
 Or via mise: ``mise run chat``
 
-Reuses the full GatewayRuntime (memory, model routing, tools, permissions)
-without the frontend or WebSocket layer.
+Builds the full GatewayRuntime (memory, model routing, tools, permissions),
+resolves agent configuration, then launches the ``claude`` CLI binary in an
+isolated environment with the agent's system prompt, model, and permissions.
+
+The model router (LiteLLM proxy) runs on localhost:4000 and the CLI
+inherits ANTHROPIC_BASE_URL so all requests route through it.
+
+Environment isolation prevents the claude binary from reading the user's
+global ~/.claude/ (plugins, settings, MCP configs). Each agent gets its
+own scoped runtime home under .data/claude-home/.
 """
 
 from __future__ import annotations
 
 import argparse
-import asyncio
 import logging
+import os
+import shutil
+import subprocess
 import sys
-import uuid
-from typing import TYPE_CHECKING
-
-if TYPE_CHECKING:
-    from prompt_toolkit.key_binding import KeyBindings
+from pathlib import Path
 
 logger = logging.getLogger("corvus-cli")
-
-
-def _create_keybindings() -> KeyBindings:
-    """Create key bindings with Escape to interrupt."""
-    from prompt_toolkit.key_binding import KeyBindings
-
-    kb = KeyBindings()
-
-    @kb.add("escape")
-    def _(event: object) -> None:
-        event.app.exit(exception=KeyboardInterrupt)  # type: ignore[attr-defined]
-
-    return kb
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     """Parse CLI arguments for corvus chat."""
     parser = argparse.ArgumentParser(
         prog="corvus chat",
-        description="Interactive terminal REPL for Corvus agents",
+        description="Launch Claude Code CLI with Corvus agent configuration",
     )
     parser.add_argument(
         "--agent", type=str, default=None, help="Agent name to chat with"
@@ -63,11 +56,6 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "--permission", type=str, default=None, help="Permission mode"
     )
     parser.add_argument(
-        "--memory-debug",
-        action="store_true",
-        help="Show decay scores and memory seeding details",
-    )
-    parser.add_argument(
         "--list-agents",
         action="store_true",
         help="List available agents and exit",
@@ -77,7 +65,36 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         action="store_true",
         help="List available models and exit",
     )
+    parser.add_argument(
+        "--verbose",
+        action="store_true",
+        help="Show the claude command before launching",
+    )
+    parser.add_argument(
+        "--print",
+        action="store_true",
+        dest="print_mode",
+        help="Pass --print to claude (non-interactive, pipe-friendly)",
+    )
     return parser.parse_args(argv)
+
+
+def _find_claude_binary() -> str:
+    """Find the claude CLI binary path."""
+    candidates = [
+        shutil.which("claude"),
+        shutil.which("wezcld"),
+        os.path.expanduser("~/.local/share/wezcld/bin/wezcld"),
+        os.path.expanduser("~/.claude/local/claude"),
+    ]
+    for path in candidates:
+        if path and os.path.isfile(path):
+            return path
+    print(
+        "Error: claude CLI binary not found. Install Claude Code first.",
+        file=sys.stderr,
+    )
+    sys.exit(1)
 
 
 def _pick_agent_interactive(runtime: object) -> str:
@@ -89,13 +106,9 @@ def _pick_agent_interactive(runtime: object) -> str:
     welcome_data = [(a.name, a.description.strip()) for a in agents]
     print(render_welcome(welcome_data))
 
-    from prompt_toolkit import PromptSession
-
-    picker_session = PromptSession(key_bindings=_create_keybindings())
-
     while True:
         try:
-            choice = picker_session.prompt("  Agent: ").strip()
+            choice = input("  Agent: ").strip()
         except (EOFError, KeyboardInterrupt):
             print()
             sys.exit(0)
@@ -127,185 +140,167 @@ def _handle_list_models(runtime: object) -> None:
     print()
 
 
-def _handle_command(
-    cmd: str,
+def _prepare_isolated_env(
+    agent_name: str,
+    runtime: object,
+) -> dict[str, str]:
+    """Build an isolated environment for the claude subprocess.
+
+    Prevents the claude binary from reading the user's global ~/.claude/
+    (plugins, settings, MCP configs). Each agent gets its own scoped
+    runtime home under .data/claude-home/.
+    """
+    from corvus.config import CLAUDE_CONFIG_TEMPLATE, CLAUDE_RUNTIME_HOME
+    from corvus.gateway.options import resolve_claude_runtime_home
+
+    # Start with current env (inherits ANTHROPIC_BASE_URL from LiteLLM)
+    env = dict(os.environ)
+
+    # Resolve per-agent runtime home
+    runtime_home = resolve_claude_runtime_home(
+        base_home=CLAUDE_RUNTIME_HOME,
+        user="cli",
+        agent_name=agent_name,
+    )
+
+    # Create isolated directory structure
+    claude_config = runtime_home / ".claude"
+    xdg_config = runtime_home / ".config"
+    xdg_cache = runtime_home / ".cache"
+    xdg_state = runtime_home / ".local" / "state"
+    xdg_data = runtime_home / ".local" / "share"
+    for path in (runtime_home, claude_config, xdg_config, xdg_cache, xdg_state, xdg_data):
+        path.mkdir(parents=True, exist_ok=True)
+
+    # Seed minimal config if absent
+    config_json = claude_config / ".claude.json"
+    if not config_json.exists():
+        template = Path(CLAUDE_CONFIG_TEMPLATE).expanduser().resolve()
+        if template.is_file():
+            shutil.copyfile(template, config_json)
+        else:
+            config_json.write_text("{}\n", encoding="utf-8")
+
+    # Copy agent-specific skills into the isolated home
+    from corvus.gateway.workspace_runtime import copy_agent_skills
+
+    config_dir = Path(__file__).resolve().parent.parent.parent
+    spec = runtime.agents_hub.get_agent(agent_name)  # type: ignore[attr-defined]
+    shared_skills = None
+    if spec and isinstance(spec.metadata, dict):
+        shared_skills = spec.metadata.get("shared_skills")
+    copy_agent_skills(
+        agent_name=agent_name,
+        config_dir=config_dir,
+        workspace_dir=runtime_home,
+        shared_skills=shared_skills,
+    )
+
+    # Override env to isolate claude from user-global state
+    env["HOME"] = str(runtime_home)
+    env["CLAUDE_CONFIG_DIR"] = str(claude_config)
+    env["XDG_CONFIG_HOME"] = str(xdg_config)
+    env["XDG_CACHE_HOME"] = str(xdg_cache)
+    env["XDG_STATE_HOME"] = str(xdg_state)
+    env["XDG_DATA_HOME"] = str(xdg_data)
+
+    return env
+
+
+def _build_claude_cmd(
+    claude_bin: str,
     runtime: object,
     agent_name: str,
-    model: str,
-    backend: str,
-    session_id: str,
-    memory_domain: str | None,
-) -> str | None:
-    """Handle slash commands. Returns 'quit' to exit REPL."""
-    from corvus.cli.chat_render import render_info
+    args: argparse.Namespace,
+) -> list[str]:
+    """Build the full claude CLI command from agent configuration."""
+    from corvus.gateway.options import resolve_backend_and_model
+    from corvus.permissions import normalize_permission_mode
 
-    parts = cmd.strip().split(maxsplit=2)
-    command = parts[0].lower()
+    cmd: list[str] = [claude_bin]
 
-    if command in ("/quit", "/exit", "/q"):
-        print("  Goodbye.")
-        return "quit"
+    # --- Isolation flags ---
+    # Only use MCP servers we explicitly pass, ignore global configs
+    cmd.append("--strict-mcp-config")
+    # Disable slash commands/skills from user-global plugins
+    cmd.append("--disable-slash-commands")
 
-    if command == "/info":
-        print(
-            render_info(agent_name, model, backend, session_id, memory_domain)
-        )
-        return None
+    # System prompt — full 6-layer composition (soul, agent soul, identity,
+    # prompt, siblings, memory context)
+    system_prompt = runtime.agents_hub.build_system_prompt(agent_name)  # type: ignore[attr-defined]
+    cmd.extend(["--system-prompt", system_prompt])
 
-    if command == "/help":
-        print(
-            """
-  /agent <name>    Switch agent (new session)
-  /model <id>      Switch model
-  /memory search   Search memory
-  /memory list     List recent memories
-  /sessions        List recent sessions
-  /info            Show session info
-  /help            Show this help
-  /quit            Exit
-"""
-        )
-        return None
+    # Model — resolved through model router (LiteLLM proxy handles routing)
+    backend, model = resolve_backend_and_model(runtime, agent_name, args.model)  # type: ignore[arg-type]
+    model_id = model if backend == "claude" else f"{backend}/{model}"
+    cmd.extend(["--model", model_id])
 
-    if command == "/memory" and len(parts) >= 2:
-        sub = parts[1].lower()
-        if sub == "search" and len(parts) >= 3:
-            query = parts[2]
-            results = runtime.memory_hub.search(  # type: ignore[attr-defined]
-                query, agent_name=agent_name, limit=10
-            )
-            if not results:
-                print("  No memories found.")
-            else:
-                for r in results:
-                    print(f"  [{r.domain}] {r.content[:200]}")
-            return None
-        if sub == "list":
-            results = runtime.memory_hub.seed_context(  # type: ignore[attr-defined]
-                agent_name, limit=10
-            )
-            if not results:
-                print("  No memories for this agent.")
-            else:
-                for r in results:
-                    print(f"  [{r.domain}] {r.content[:200]}")
-            return None
-
-    print(
-        f"  Unknown command: {command}. Type /help for available commands."
-    )
-    return None
-
-
-def _repl(runtime: object, args: argparse.Namespace) -> None:
-    """Main REPL loop (synchronous — prompt_toolkit manages its own event loop)."""
-    from corvus.cli.chat_render import format_agent_name, format_tool_call, render_info
-    from corvus.gateway.options import build_backend_options, resolve_backend_and_model
-
-    agent_name = args.agent or _pick_agent_interactive(runtime)
-    session_id = args.resume or f"cli-{uuid.uuid4().hex[:12]}"
-
-    backend, model = resolve_backend_and_model(runtime, agent_name, args.model)
+    # Permission mode
     spec = runtime.agents_hub.get_agent(agent_name)  # type: ignore[attr-defined]
-    memory_domain = spec.memory.own_domain if spec and spec.memory else None
-
-    print(
-        render_info(
-            agent=agent_name,
-            model=model,
-            backend=backend,
-            session_id=session_id,
-            memory_domain=memory_domain,
-        )
-    )
-
-    opts = build_backend_options(
-        runtime=runtime,
-        user="cli",
-        websocket=None,
-        backend_name=backend,
-        active_model=model,
-        agent_name=agent_name,
-        session_id=session_id,
-    )
-
     if args.permission:
-        opts.permission_mode = args.permission
+        permission_mode = args.permission
+    elif spec and isinstance(spec.metadata, dict):
+        raw = spec.metadata.get("permission_mode")
+        permission_mode = normalize_permission_mode(
+            str(raw).strip() if isinstance(raw, str) and raw.strip() else None,
+            fallback="default",
+        )
+    else:
+        permission_mode = "default"
+    cmd.extend(["--permission-mode", permission_mode])
 
-    client_kwargs: dict = {}
+    # Allowed tools from agent spec (auto-approve these)
+    if spec and spec.tools.builtin:
+        cmd.extend(["--allowedTools", *spec.tools.builtin])
+
+    # Budget
     if args.budget is not None:
-        client_kwargs["max_budget_usd"] = args.budget
+        cmd.extend(["--max-budget-usd", str(args.budget)])
+
+    # Max turns (only works with --print)
     if args.max_turns is not None:
-        client_kwargs["max_turns"] = args.max_turns
+        cmd.extend(["--max-turns", str(args.max_turns)])
+
+    # Resume session
     if args.resume:
-        client_kwargs["resume"] = args.resume
+        cmd.extend(["--resume", args.resume])
 
-    from prompt_toolkit import PromptSession
-    from prompt_toolkit.history import InMemoryHistory
+    # Print mode (non-interactive)
+    if args.print_mode:
+        cmd.append("--print")
 
-    repl_session = PromptSession(
-        history=InMemoryHistory(),
-        key_bindings=_create_keybindings(),
-    )
-
-    while True:
-        try:
-            user_input = repl_session.prompt(
-                f"\n  {format_agent_name(agent_name)} > "
-            ).strip()
-        except (EOFError, KeyboardInterrupt):
-            print("\n  Goodbye.")
-            break
-
-        if not user_input:
-            continue
-
-        if user_input.startswith("/"):
-            handled = _handle_command(
-                user_input,
-                runtime,
-                agent_name,
-                model,
-                backend,
-                session_id,
-                memory_domain,
-            )
-            if handled == "quit":
-                break
-            continue
-
-        try:
-            asyncio.run(
-                _send_and_receive(opts, client_kwargs, user_input, format_tool_call, session_id)
-            )
-        except Exception as exc:
-            print(f"\n  \033[31mError: {exc}\033[0m")
+    return cmd
 
 
-async def _send_and_receive(
-    opts: object,
-    client_kwargs: dict,
-    user_input: str,
-    format_tool_call: object,
-    session_id: str,
-) -> None:
-    """Connect to SDK, send a message, stream the response, then disconnect."""
-    from claude_agent_sdk import ClaudeSDKClient
-    from claude_agent_sdk.types import AssistantMessage, TextBlock
+def _start_litellm(runtime: object) -> None:
+    """Start LiteLLM proxy so model routing works."""
+    import asyncio
 
-    async with ClaudeSDKClient(options=opts, **client_kwargs) as client:
-        await client.query(user_input, session_id=session_id)
-        async for msg in client.receive_response():
-            if isinstance(msg, AssistantMessage):
-                for block in msg.content:
-                    if isinstance(block, TextBlock):
-                        print(f"\n  {block.text}")
-            else:
-                msg_type = getattr(msg, "type", None) or type(msg).__name__
-                if msg_type in ("tool_use", "ToolUseMessage"):
-                    tool_name = getattr(msg, "name", "unknown")
-                    tool_input = getattr(msg, "input", {})
-                    print(format_tool_call(tool_name, tool_input))  # type: ignore[operator]
+    try:
+        asyncio.run(
+            runtime.litellm_manager.start(Path("config/models.yaml"))  # type: ignore[attr-defined]
+        )
+        runtime.model_router.discover_models()  # type: ignore[attr-defined]
+        logger.info(
+            "LiteLLM proxy started, ANTHROPIC_BASE_URL=%s",
+            os.environ.get("ANTHROPIC_BASE_URL"),
+        )
+    except Exception as exc:
+        logger.warning("LiteLLM proxy failed to start: %s — using direct API", exc)
+        print(
+            f"  Warning: LiteLLM proxy not available ({exc}). Using direct API.",
+            file=sys.stderr,
+        )
+
+
+def _stop_litellm(runtime: object) -> None:
+    """Stop LiteLLM proxy on exit."""
+    import asyncio
+
+    try:
+        asyncio.run(runtime.litellm_manager.stop())  # type: ignore[attr-defined]
+    except Exception:
+        pass
 
 
 def main() -> None:
@@ -325,7 +320,42 @@ def main() -> None:
         _handle_list_models(runtime)
         return
 
-    _repl(runtime, args)
+    agent_name = args.agent or _pick_agent_interactive(runtime)
+    claude_bin = _find_claude_binary()
+
+    # Start LiteLLM proxy for model routing
+    _start_litellm(runtime)
+
+    # Build isolated environment (prevents global plugin/config leakage)
+    env = _prepare_isolated_env(agent_name, runtime)
+
+    cmd = _build_claude_cmd(claude_bin, runtime, agent_name, args)
+
+    if args.verbose:
+        # Show command with truncated system prompt for readability
+        display = []
+        skip_next = False
+        for i, arg in enumerate(cmd):
+            if skip_next:
+                skip_next = False
+                continue
+            if arg == "--system-prompt" and i + 1 < len(cmd):
+                display.append(
+                    f"--system-prompt '<{agent_name} prompt: {len(cmd[i + 1])} chars>'"
+                )
+                skip_next = True
+            else:
+                display.append(arg)
+        print(f"\n  {' '.join(display)}\n")
+        print(f"  Isolated HOME: {env['HOME']}")
+
+    print(f"\n  Launching Claude Code as @{agent_name}...\n")
+
+    try:
+        result = subprocess.run(cmd, env=env)
+        sys.exit(result.returncode)
+    finally:
+        _stop_litellm(runtime)
 
 
 if __name__ == "__main__":
