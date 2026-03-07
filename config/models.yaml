@@ -106,6 +106,10 @@ backends:
     type: openai
     # base_url from OPENAI_COMPAT_BASE_URL env var
     # api_key from OPENAI_COMPAT_API_KEY env var (optional)
+  acp:
+    type: acp
+    # Not routed through LiteLLM — ACP manages agent processes directly.
+    # Agent commands are defined in config/acp_agents.yaml.
 
 # LiteLLM proxy configuration — routing, retries, fallbacks.
 # These settings are translated into litellm_config.yaml at startup.
