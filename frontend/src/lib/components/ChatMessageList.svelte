@@ -4,7 +4,6 @@
 	import type { AgentInfo, AgentStatus, ChatMessage, ConnectionStatus, Task } from '$lib/types';
 	import { WELL_KNOWN_AGENTS } from '$lib/types';
 	import { getThemeContext } from '$lib/themes/context';
-	import AgentIdentityChip from './AgentIdentityChip.svelte';
 	import AgentPortrait from './AgentPortrait.svelte';
 	import ChatRuntimeStatus from './ChatRuntimeStatus.svelte';
 	import ConnectionToast from './ConnectionToast.svelte';
@@ -199,8 +198,18 @@
 					{/if}
 					<div class="flex-1 min-w-0">
 						{#if message.role === 'assistant' && message.agent}
-							<div class="mb-1">
-								<AgentIdentityChip agent={message.agent} model={message.model} />
+							<div class="flex items-center gap-1.5 mb-1">
+								<span
+									class="text-xs font-medium"
+									style="color: var(--color-agent-{message.agent});"
+								>
+									@{message.agent}
+								</span>
+								{#if message.model}
+									<span class="text-[10px] px-1 py-px rounded bg-surface-raised text-text-muted border border-border-muted">
+										{message.model}
+									</span>
+								{/if}
 							</div>
 						{/if}
 						{#if message.role === 'assistant' && message.isError}
