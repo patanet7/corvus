@@ -199,8 +199,6 @@ def _handle_command(
 
 def _repl(runtime: object, args: argparse.Namespace) -> None:
     """Main REPL loop (synchronous — prompt_toolkit manages its own event loop)."""
-    from claude_agent_sdk import ClaudeSDKClient
-
     from corvus.cli.chat_render import format_agent_name, format_tool_call, render_info
     from corvus.gateway.options import build_backend_options, resolve_backend_and_model
 
@@ -242,8 +240,6 @@ def _repl(runtime: object, args: argparse.Namespace) -> None:
     if args.resume:
         client_kwargs["resume"] = args.resume
 
-    client = ClaudeSDKClient(opts, **client_kwargs)
-
     from prompt_toolkit import PromptSession
     from prompt_toolkit.history import InMemoryHistory
 
@@ -279,24 +275,37 @@ def _repl(runtime: object, args: argparse.Namespace) -> None:
             continue
 
         try:
-            asyncio.run(_send_and_receive(client, user_input, format_tool_call))
+            asyncio.run(
+                _send_and_receive(opts, client_kwargs, user_input, format_tool_call, session_id)
+            )
         except Exception as exc:
             print(f"\n  \033[31mError: {exc}\033[0m")
 
 
-async def _send_and_receive(client: object, user_input: str, format_tool_call: object) -> None:
-    """Send a message and stream the response (async helper for REPL)."""
-    await client.query(user_input)  # type: ignore[attr-defined]
-    async for msg in client.receive_response():  # type: ignore[attr-defined]
-        msg_type = getattr(msg, "type", None) or type(msg).__name__
-        if msg_type in ("text", "AssistantMessage"):
-            content = getattr(msg, "content", "") or getattr(msg, "text", "")
-            if content:
-                print(f"\n  {content}")
-        elif msg_type in ("tool_use", "ToolUseMessage"):
-            tool_name = getattr(msg, "name", "unknown")
-            tool_input = getattr(msg, "input", {})
-            print(format_tool_call(tool_name, tool_input))  # type: ignore[operator]
+async def _send_and_receive(
+    opts: object,
+    client_kwargs: dict,
+    user_input: str,
+    format_tool_call: object,
+    session_id: str,
+) -> None:
+    """Connect to SDK, send a message, stream the response, then disconnect."""
+    from claude_agent_sdk import ClaudeSDKClient
+    from claude_agent_sdk.types import AssistantMessage, TextBlock
+
+    async with ClaudeSDKClient(options=opts, **client_kwargs) as client:
+        await client.query(user_input, session_id=session_id)
+        async for msg in client.receive_response():
+            if isinstance(msg, AssistantMessage):
+                for block in msg.content:
+                    if isinstance(block, TextBlock):
+                        print(f"\n  {block.text}")
+            else:
+                msg_type = getattr(msg, "type", None) or type(msg).__name__
+                if msg_type in ("tool_use", "ToolUseMessage"):
+                    tool_name = getattr(msg, "name", "unknown")
+                    tool_input = getattr(msg, "input", {})
+                    print(format_tool_call(tool_name, tool_input))  # type: ignore[operator]
 
 
 def main() -> None:
