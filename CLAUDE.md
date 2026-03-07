@@ -38,9 +38,11 @@ mise run break-glass        # Start server in break-glass mode
 ## Package Management
 
 **Always use `uv` for package operations**, not bare `pip`:
-- Install: `uv pip install <package>`
-- Install from requirements: `uv pip install -r requirements.txt`
-- Sync: `uv pip sync requirements.txt`
+- Add a dependency: `uv add <package>`
+- Remove a dependency: `uv remove <package>`
+- Sync/install from lockfile: `uv sync`
+- Upgrade a dependency: `uv lock --upgrade-package <package> && uv sync`
+- The lockfile (`uv.lock`) and `pyproject.toml` are the sources of truth — never edit `requirements.txt` directly
 
 ## Runtime — Python Only
 

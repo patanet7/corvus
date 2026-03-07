@@ -28,6 +28,7 @@ dependencies = [
     "zxcvbn-python",
     "textual",
     "prompt_toolkit",
+    "agent-client-protocol>=0.8.1",
 ]
 
 [project.optional-dependencies]
