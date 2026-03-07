@@ -1,145 +1,129 @@
-"""Claw setup CLI — Textual TUI entrypoint."""
+"""Corvus setup CLI — Textual TUI entrypoint.
+
+First run: Welcome (key backup) -> Dashboard -> Break-glass
+Re-run: Dashboard (populated with existing credentials, masked)
+"""
 
 import sys
+from pathlib import Path
 
 from textual.app import App
 
-from corvus.cli.screens.backends import ModelBackendsScreen
-from corvus.cli.screens.complete import CompleteScreen
+from corvus.cli.screens.custom_modal import CustomModal
+from corvus.cli.screens.dashboard import DashboardScreen
+from corvus.cli.screens.oauth_modal import OAuthModal
 from corvus.cli.screens.passphrase import PassphraseScreen
-from corvus.cli.screens.services import ServicesScreen
+from corvus.cli.screens.provider_modal import ProviderModal
 from corvus.cli.screens.welcome import WelcomeScreen
+from corvus.credential_store import CredentialStore
 
 
-class ClawSetupApp(App):
-    """Claw setup wizard — multi-screen TUI."""
+def is_first_run(config_dir: Path | None = None) -> bool:
+    """Check if this is the first time setup is being run."""
+    config_dir = config_dir or Path.home() / ".corvus"
+    return not (config_dir / "credentials.json").exists()
 
-    TITLE = "Claw Setup"
+
+class CorvusSetupApp(App):
+    """Corvus setup — dashboard-first credential management."""
+
+    TITLE = "Corvus Setup"
+
     CSS = """
     Screen {
-        align: center middle;
-    }
-    #title {
-        text-style: bold;
-        color: $accent;
-        text-align: center;
-        width: 100%;
-        margin-bottom: 1;
-    }
-    #description {
-        text-align: center;
-        width: 60;
-        margin-bottom: 1;
-    }
-    Button {
-        margin: 1 2;
+        background: $surface;
     }
     """
 
-    SCREENS = {
-        "welcome": WelcomeScreen,
-        "backends": ModelBackendsScreen,
-        "services": ServicesScreen,
-        "passphrase": PassphraseScreen,
-        "complete": CompleteScreen,
-    }
+    def __init__(self, config_dir: Path | None = None, **kwargs) -> None:
+        super().__init__(**kwargs)
+        self._config_dir = config_dir or Path.home() / ".corvus"
+        self._store: CredentialStore | None = None
+        self._credential_data: dict = {}
 
     def on_mount(self) -> None:
-        self.push_screen("welcome")
+        creds_path = self._config_dir / "credentials.json"
+        age_key = self._config_dir / "age-key.txt"
 
-    def _save_credentials(self) -> None:
-        """Save collected credentials to the CredentialStore."""
-        from pathlib import Path
+        if creds_path.exists() and age_key.exists():
+            # Re-run: load existing credentials, go to dashboard
+            try:
+                self._store = CredentialStore(
+                    path=creds_path,
+                    age_key_file=str(age_key),
+                )
+                self._store.load()
+                self._credential_data = self._store._data.copy()
+            except Exception:
+                self._credential_data = {}
+            self._push_dashboard()
+        else:
+            # First run: show welcome screen
+            self.install_screen(WelcomeScreen(), name="welcome")
+            self.push_screen("welcome")
 
-        from corvus.break_glass import BreakGlassManager
-        from corvus.credential_store import CredentialStore
+    def _push_dashboard(self) -> None:
+        dashboard = DashboardScreen(credential_data=self._credential_data)
+        self.install_screen(dashboard, name="dashboard")
+        self.install_screen(PassphraseScreen(), name="passphrase")
+        self.push_screen("dashboard")
 
-        config_dir = Path.home() / ".corvus"
-        config_dir.mkdir(parents=True, exist_ok=True)
-
-        age_key_file = config_dir / "age-key.txt"
-        if not age_key_file.exists():
-            import subprocess
-
-            subprocess.run(
-                ["age-keygen", "-o", str(age_key_file)],
-                capture_output=True,
-                check=True,
-            )
-            age_key_file.chmod(0o600)
-
-        store = CredentialStore(
-            path=config_dir / "credentials.json",
-            age_key_file=str(age_key_file),
+    def _get_or_create_store(self) -> CredentialStore:
+        """Get existing store or create a new one."""
+        if self._store is not None:
+            return self._store
+        age_key = self._config_dir / "age-key.txt"
+        self._store = CredentialStore(
+            path=self._config_dir / "credentials.json",
+            age_key_file=str(age_key),
         )
+        return self._store
 
-        # Save LLM backend credentials
-        backends_data = getattr(self, "_backends_data", {})
+    def save_provider_credentials(
+        self, store_key: str, data: dict[str, str]
+    ) -> None:
+        """Save credentials for a provider to the SOPS store."""
+        store = self._get_or_create_store()
+        store.set_bulk(store_key, data)
+        self._credential_data[store_key] = data
 
-        # Map wizard field names to credential store keys
-        backend_key_map = {
-            "claude": {"api-key": "api_key"},
-            "openai": {"api-key": "api_key"},
-            "ollama": {"base-url": "base_url"},
-            "kimi": {"api-key": "api_key"},
-            "openai-compat": {
-                "label": "label",
-                "base-url": "base_url",
-                "api-key": "api_key",
-            },
+    def save_oauth_tokens(self, provider_id: str, tokens) -> None:
+        """Save OAuth tokens to the SOPS store."""
+        store = self._get_or_create_store()
+        store.set_bulk(provider_id, {
+            "access_token": tokens.access_token,
+            "refresh_token": tokens.refresh_token,
+            "expires": str(tokens.expires),
+            "account_id": tokens.account_id,
+        })
+        self._credential_data[provider_id] = {
+            "access_token": tokens.access_token,
+            "refresh_token": tokens.refresh_token,
+            "expires": str(tokens.expires),
+            "account_id": tokens.account_id,
         }
 
-        for backend_id, fields in backends_data.items():
-            # Store under "anthropic" for Claude to keep backward compat with inject()
-            store_key = "anthropic" if backend_id == "claude" else backend_id
-            key_map = backend_key_map.get(backend_id, {})
-            for field_key, value in fields.items():
-                cred_key = key_map.get(field_key, field_key)
-                store.set(store_key, cred_key, value)
-
-        # Codex OAuth tokens (stored by OAuth flow, not by text fields)
-        if hasattr(self, "_codex_tokens"):
-            tokens = self._codex_tokens
-            store.set("codex", "access_token", tokens.access_token)
-            store.set("codex", "refresh_token", tokens.refresh_token)
-            store.set("codex", "expires", str(tokens.expires))
-            store.set("codex", "account_id", tokens.account_id)
-
-        # Save service credentials
-        if hasattr(self, "_services_data"):
-            for svc_id, svc_data in self._services_data.items():
-                for key, value in svc_data.items():
-                    store.set(svc_id, key, value)
-
-        if getattr(self, "_passphrase_set", False) and hasattr(self, "_passphrase"):
-            mgr = BreakGlassManager(config_dir=config_dir)
-            mgr.set_passphrase(self._passphrase)
+    def save_custom_provider(self, data: dict[str, str]) -> None:
+        """Save a custom provider/service to the SOPS store."""
+        name = data.pop("_name", "")
+        data.pop("_section", "")
+        if not name:
+            return
+        store = self._get_or_create_store()
+        store.set_bulk(name, data)
+        self._credential_data[name] = data
 
 
 def main() -> None:
     """CLI entrypoint for setup wizard."""
     args = sys.argv[1:]
     if not args:
-        app = ClawSetupApp()
+        app = CorvusSetupApp()
         app.run()
     elif args[0] == "status":
-        from corvus.cli.screens.status import StatusScreen
-
-        class StatusApp(App):
-            TITLE = "Claw Status"
-            CSS = ClawSetupApp.CSS
-            SCREENS = {"status": StatusScreen}
-
-            def on_mount(self) -> None:
-                self.push_screen("status")
-
-        StatusApp().run()
-    elif args[0] == "add":
-        print("Add credential not yet implemented")
-    elif args[0] == "rotate":
-        print("Rotate credential not yet implemented")
-    elif args[0] == "passphrase":
-        print("Passphrase management not yet implemented")
+        # Status is now the same as the dashboard
+        app = CorvusSetupApp()
+        app.run()
     else:
         print(f"Unknown command: {args[0]}")
         sys.exit(1)
