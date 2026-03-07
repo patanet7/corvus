@@ -84,7 +84,12 @@ class AgentRegistry:
     # ------------------------------------------------------------------
 
     def load(self) -> None:
-        """Load all *.yaml specs from config_dir, skipping invalid ones."""
+        """Load all agent specs from config_dir.
+
+        Supports two layouts:
+        - Flat: config/agents/<name>.yaml
+        - Directory: config/agents/<name>/agent.yaml (with optional soul.md, prompt.md)
+        """
         self._specs.clear()
         self._file_contents.clear()
         if not self._config_dir.exists():
@@ -92,14 +97,31 @@ class AgentRegistry:
             return
         for yaml_file in sorted(self._config_dir.glob("*.yaml")):
             self._load_one(yaml_file)
+        for subdir in sorted(self._config_dir.iterdir()):
+            if not subdir.is_dir():
+                continue
+            agent_yaml = subdir / "agent.yaml"
+            if agent_yaml.exists():
+                self._load_one(agent_yaml, agent_dir=subdir)
 
-    def _load_one(self, path: Path) -> bool:
-        """Load a single YAML file. Returns True on success, False on skip."""
+    def _load_one(self, path: Path, agent_dir: Path | None = None) -> bool:
+        """Load a single YAML file. Returns True on success, False on skip.
+
+        When *agent_dir* is provided (directory-based layout), soul.md and
+        prompt.md are resolved by convention from the agent directory.
+        """
         try:
             spec = AgentSpec.from_yaml(path)
         except (yaml.YAMLError, ValueError, KeyError, TypeError) as exc:
             logger.warning("Failed to parse %s: %s", path.name, exc)
             return False
+        if agent_dir is not None:
+            soul_path = agent_dir / "soul.md"
+            prompt_path = agent_dir / "prompt.md"
+            if prompt_path.exists() and not spec.prompt_file:
+                spec.prompt_file = str(prompt_path.relative_to(self._config_dir.parent.parent))
+            if soul_path.exists() and not spec.soul_file:
+                spec.soul_file = str(soul_path.relative_to(self._config_dir.parent.parent))
         errors = self.validate(spec)
         if errors:
             logger.warning("Invalid spec %s: %s", path.name, "; ".join(errors))
@@ -237,6 +259,8 @@ class AgentRegistry:
         # Build a map of what is on disk now
         disk_specs: dict[str, AgentSpec] = {}
         disk_contents: dict[str, str] = {}
+
+        # Flat YAML files
         for yaml_file in sorted(self._config_dir.glob("*.yaml")):
             try:
                 spec = AgentSpec.from_yaml(yaml_file)
@@ -253,6 +277,34 @@ class AgentRegistry:
                 continue
             disk_specs[spec.name] = spec
             disk_contents[spec.name] = yaml_file.read_text()
+
+        # Directory-based agents
+        for subdir in sorted(self._config_dir.iterdir()):
+            if not subdir.is_dir():
+                continue
+            agent_yaml = subdir / "agent.yaml"
+            if not agent_yaml.exists():
+                continue
+            try:
+                spec = AgentSpec.from_yaml(agent_yaml)
+            except Exception as exc:
+                result.errors[subdir.name] = str(exc)
+                logger.warning("Reload: failed to parse %s/agent.yaml: %s", subdir.name, exc)
+                continue
+            # Apply directory conventions for soul.md / prompt.md
+            soul_path = subdir / "soul.md"
+            prompt_path = subdir / "prompt.md"
+            if prompt_path.exists() and not spec.prompt_file:
+                spec.prompt_file = str(prompt_path.relative_to(self._config_dir.parent.parent))
+            if soul_path.exists() and not spec.soul_file:
+                spec.soul_file = str(soul_path.relative_to(self._config_dir.parent.parent))
+            errors = self.validate(spec)
+            if errors:
+                result.errors[subdir.name] = "; ".join(errors)
+                logger.warning("Reload: invalid spec %s/agent.yaml: %s", subdir.name, "; ".join(errors))
+                continue
+            disk_specs[spec.name] = spec
+            disk_contents[spec.name] = agent_yaml.read_text()
 
         # Compute diff
         old_names = set(self._specs.keys())
