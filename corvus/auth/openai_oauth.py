@@ -17,7 +17,9 @@ import secrets
 import time
 import urllib.error
 from dataclasses import dataclass
-from urllib.parse import urlencode
+from http.server import BaseHTTPRequestHandler, HTTPServer
+from typing import Any
+from urllib.parse import parse_qs, urlencode, urlparse
 from urllib.request import Request, urlopen
 
 logger = logging.getLogger(__name__)
@@ -26,7 +28,8 @@ OPENAI_AUTH_BASE = "https://auth.openai.com"
 OPENAI_AUTHORIZE_URL = f"{OPENAI_AUTH_BASE}/oauth/authorize"
 OPENAI_TOKEN_URL = f"{OPENAI_AUTH_BASE}/oauth/token"
 CODEX_CLIENT_ID = "app_codex"
-REDIRECT_URI = "http://127.0.0.1:1455/auth/callback"
+CALLBACK_PORT = 1455
+REDIRECT_URI = f"http://127.0.0.1:{CALLBACK_PORT}/auth/callback"
 
 
 @dataclass(frozen=True)
@@ -211,3 +214,41 @@ def refresh_access_token(
         error_prefix="Token refresh failed",
         fallback_refresh=refresh_token,
     )
+
+
+def run_callback_server(
+    *,
+    port: int = CALLBACK_PORT,
+) -> tuple[HTTPServer, Any]:
+    """Start a local HTTP server to capture the OAuth callback.
+
+    Returns:
+        A tuple of (server, get_result) where get_result() returns
+        {"code": ..., "state": ...} after the callback is received.
+    """
+    captured: dict[str, str] = {}
+
+    class CallbackHandler(BaseHTTPRequestHandler):
+        def do_GET(self) -> None:
+            parsed = urlparse(self.path)
+            params = parse_qs(parsed.query)
+            captured["code"] = params.get("code", [""])[0]
+            captured["state"] = params.get("state", [""])[0]
+
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html")
+            self.end_headers()
+            self.wfile.write(
+                b"<html><body><h1>Authentication successful</h1>"
+                b"<p>You can close this window.</p></body></html>"
+            )
+
+        def log_message(self, *_args: Any) -> None:
+            pass
+
+    server = HTTPServer(("127.0.0.1", port), CallbackHandler)
+
+    def get_result() -> dict[str, str]:
+        return captured
+
+    return server, get_result

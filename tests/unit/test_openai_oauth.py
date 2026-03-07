@@ -6,6 +6,7 @@ import json
 import time
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from threading import Thread
+from urllib.request import urlopen as stdlib_urlopen
 
 from corvus.auth.openai_oauth import (
     OAuthTokens,
@@ -14,6 +15,7 @@ from corvus.auth.openai_oauth import (
     exchange_code_for_tokens,
     generate_pkce,
     refresh_access_token,
+    run_callback_server,
 )
 
 
@@ -214,3 +216,26 @@ class TestRefreshAccessToken:
 
         assert result.refresh_token == "my_original_refresh"
         assert result.access_token == new_access
+
+
+class TestRunCallbackServer:
+    """Tests for the local OAuth callback server."""
+
+    def test_captures_code_and_state(self) -> None:
+        """Server must capture code and state from callback URL params."""
+        server, get_result = run_callback_server(port=0)
+        port = server.server_address[1]
+        thread = Thread(target=server.handle_request, daemon=True)
+        thread.start()
+
+        # Simulate browser callback
+        stdlib_urlopen(
+            f"http://127.0.0.1:{port}/auth/callback?code=test_auth_code&state=test_state",
+            timeout=5,
+        )
+        thread.join(timeout=2)
+        server.server_close()
+
+        result = get_result()
+        assert result["code"] == "test_auth_code"
+        assert result["state"] == "test_state"
