@@ -15,9 +15,12 @@ import json
 import logging
 import secrets
 import time
+import urllib.error
 from dataclasses import dataclass
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
+
+logger = logging.getLogger(__name__)
 
 OPENAI_AUTH_BASE = "https://auth.openai.com"
 OPENAI_AUTHORIZE_URL = f"{OPENAI_AUTH_BASE}/oauth/authorize"
@@ -72,9 +75,6 @@ def build_authorize_url(pkce: PkceParams) -> str:
     return f"{OPENAI_AUTHORIZE_URL}?{urlencode(params)}"
 
 
-logger = logging.getLogger(__name__)
-
-
 def decode_jwt_account_id(token: str) -> str:
     """Extract chatgpt_account_id from an OpenAI access token JWT.
 
@@ -89,7 +89,7 @@ def decode_jwt_account_id(token: str) -> str:
             payload_b64 += "=" * padding
         payload = json.loads(base64.urlsafe_b64decode(payload_b64))
         return payload.get("https://api.openai.com/auth", {}).get("chatgpt_account_id", "")
-    except (IndexError, json.JSONDecodeError, Exception):
+    except (IndexError, ValueError, json.JSONDecodeError, UnicodeDecodeError):
         logger.warning("Failed to decode account_id from JWT")
         return ""
 
@@ -128,12 +128,19 @@ def exchange_code_for_tokens(
         method="POST",
     )
 
-    with urlopen(req, timeout=30) as resp:
-        if resp.status != 200:
-            raise RuntimeError(f"Token exchange failed: HTTP {resp.status}")
-        data = json.loads(resp.read())
+    try:
+        with urlopen(req, timeout=30) as resp:
+            data = json.loads(resp.read())
+    except urllib.error.HTTPError as exc:
+        raise RuntimeError(f"Token exchange failed: HTTP {exc.code}") from exc
+    except urllib.error.URLError as exc:
+        raise RuntimeError(f"Token exchange failed: {exc.reason}") from exc
+    except json.JSONDecodeError as exc:
+        raise RuntimeError("Token exchange failed: invalid JSON response") from exc
 
-    access_token = data["access_token"]
+    access_token = data.get("access_token")
+    if not access_token:
+        raise RuntimeError("Token exchange failed: no access_token in response")
     refresh_token = data.get("refresh_token", "")
     expires_in = data.get("expires_in", 3600)
     expires = int(time.time()) + expires_in
