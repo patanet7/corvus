@@ -8,10 +8,8 @@ const meta = {
 	tags: ['autodocs'],
 	args: {
 		availableAgents: storyAgents,
-		dispatchMode: 'router',
 		selectedRecipients: [],
 		sendToAll: false,
-		onDispatchModeChange: () => {},
 		onRecipientsChange: () => {}
 	}
 } satisfies Meta<typeof RecipientPicker>;
@@ -19,18 +17,16 @@ const meta = {
 export default meta;
 type Story = StoryObj<typeof meta>;
 
-export const Router: Story = {};
+export const Default: Story = {};
 
-export const Direct: Story = {
+export const WithRecipient: Story = {
 	args: {
-		dispatchMode: 'direct',
 		selectedRecipients: ['homelab']
 	}
 };
 
-export const ParallelAll: Story = {
+export const SendToAll: Story = {
 	args: {
-		dispatchMode: 'parallel',
 		sendToAll: true
 	}
 };

@@ -39,7 +39,7 @@
 		availableAgents = []
 	}: Props = $props();
 
-	const welcomeAgents = $derived(availableAgents.filter((a) => a.id !== 'general'));
+	const welcomeAgents = $derived(availableAgents.filter((a) => a.id !== 'general' && a.id !== 'huginn'));
 	const themeCtx = getThemeContext();
 	const chatMaxWidth = $derived(themeCtx.theme.components.chatPanel.maxWidth);
 	const messagePadding = $derived(themeCtx.theme.components.chatPanel.messagePadding);

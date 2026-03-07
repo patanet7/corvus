@@ -1,21 +1,17 @@
 <script lang="ts">
-	import type { AgentInfo, DispatchMode } from '$lib/types';
+	import type { AgentInfo } from '$lib/types';
 
 	interface Props {
 		availableAgents: AgentInfo[];
-		dispatchMode: DispatchMode;
 		selectedRecipients: string[];
 		sendToAll: boolean;
-		onDispatchModeChange: (mode: DispatchMode) => void;
 		onRecipientsChange: (recipients: string[], sendToAll: boolean) => void;
 	}
 
 	let {
 		availableAgents,
-		dispatchMode,
 		selectedRecipients,
 		sendToAll,
-		onDispatchModeChange,
 		onRecipientsChange
 	}: Props = $props();
 
@@ -32,38 +28,7 @@
 	}
 </script>
 
-<div class="mb-2 space-y-1">
-	<div class="flex items-center gap-1 text-[10px] uppercase tracking-wide text-text-muted">
-		<span class="rounded border border-border-muted px-1 py-0.5">Dispatch</span>
-		<button
-			type="button"
-			class="rounded border px-1.5 py-0.5 transition-colors {dispatchMode === 'router'
-				? 'border-focus text-text-primary bg-surface-raised'
-				: 'border-border-muted text-text-secondary hover:text-text-primary'}"
-			onclick={() => onDispatchModeChange('router')}
-		>
-			Router
-		</button>
-		<button
-			type="button"
-			class="rounded border px-1.5 py-0.5 transition-colors {dispatchMode === 'direct'
-				? 'border-focus text-text-primary bg-surface-raised'
-				: 'border-border-muted text-text-secondary hover:text-text-primary'}"
-			onclick={() => onDispatchModeChange('direct')}
-		>
-			Direct
-		</button>
-		<button
-			type="button"
-			class="rounded border px-1.5 py-0.5 transition-colors {dispatchMode === 'parallel'
-				? 'border-focus text-text-primary bg-surface-raised'
-				: 'border-border-muted text-text-secondary hover:text-text-primary'}"
-			onclick={() => onDispatchModeChange('parallel')}
-		>
-			Parallel
-		</button>
-	</div>
-
+<div class="mb-1">
 	<div class="relative">
 		<div class="flex flex-wrap items-center gap-1">
 			<button
