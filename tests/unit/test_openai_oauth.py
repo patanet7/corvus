@@ -2,8 +2,25 @@
 
 import base64
 import hashlib
+import json
+import time
+from http.server import BaseHTTPRequestHandler, HTTPServer
+from threading import Thread
 
-from corvus.auth.openai_oauth import build_authorize_url, generate_pkce
+from corvus.auth.openai_oauth import (
+    OAuthTokens,
+    build_authorize_url,
+    decode_jwt_account_id,
+    exchange_code_for_tokens,
+    generate_pkce,
+)
+
+
+def _make_fake_jwt(payload: dict) -> str:
+    """Build a fake JWT (header.payload.signature) for testing."""
+    header = base64.urlsafe_b64encode(json.dumps({"alg": "none"}).encode()).rstrip(b"=").decode()
+    body = base64.urlsafe_b64encode(json.dumps(payload).encode()).rstrip(b"=").decode()
+    return f"{header}.{body}.fakesig"
 
 
 class TestGeneratePkce:
@@ -46,3 +63,67 @@ class TestBuildAuthorizeUrl:
         assert "state=" + pkce.state in url
         assert "code_challenge_method=S256" in url
         assert "redirect_uri=" in url
+
+
+class TestDecodeJwtAccountId:
+    """Tests for JWT account_id extraction."""
+
+    def test_extracts_account_id(self) -> None:
+        """Must extract chatgpt_account_id from OpenAI JWT claims."""
+        token = _make_fake_jwt({
+            "https://api.openai.com/auth": {"chatgpt_account_id": "acc_abc123"},
+            "sub": "user123",
+        })
+        assert decode_jwt_account_id(token) == "acc_abc123"
+
+    def test_returns_empty_on_missing_claim(self) -> None:
+        """Must return empty string if claim is missing."""
+        token = _make_fake_jwt({"sub": "user123"})
+        assert decode_jwt_account_id(token) == ""
+
+
+class TestExchangeCodeForTokens:
+    """Tests for OAuth token exchange against a fake token endpoint."""
+
+    def test_exchanges_code_successfully(self) -> None:
+        """Must POST to token endpoint and return OAuthTokens."""
+        fake_access = _make_fake_jwt({
+            "https://api.openai.com/auth": {"chatgpt_account_id": "acc_test"},
+        })
+        response_body = json.dumps({
+            "access_token": fake_access,
+            "refresh_token": "refresh_xyz",
+            "expires_in": 3600,
+            "token_type": "Bearer",
+        }).encode()
+
+        class Handler(BaseHTTPRequestHandler):
+            def do_POST(self):
+                self.send_response(200)
+                self.send_header("Content-Type", "application/json")
+                self.end_headers()
+                self.wfile.write(response_body)
+
+            def log_message(self, *args):
+                pass
+
+        server = HTTPServer(("127.0.0.1", 0), Handler)
+        port = server.server_address[1]
+        thread = Thread(target=server.handle_request, daemon=True)
+        thread.start()
+
+        try:
+            result = exchange_code_for_tokens(
+                code="test_code",
+                verifier="test_verifier",
+                token_url=f"http://127.0.0.1:{port}/oauth/token",
+            )
+        finally:
+            server.server_close()
+            thread.join(timeout=2)
+
+        assert isinstance(result, OAuthTokens)
+        assert result.access_token == fake_access
+        assert result.refresh_token == "refresh_xyz"
+        assert result.account_id == "acc_test"
+        assert result.expires > int(time.time())
