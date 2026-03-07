@@ -44,6 +44,18 @@ def _unique_name(prefix: str) -> str:
 
 
 @skip_no_docker
+def _docker_healthy() -> bool:
+    """Check if Docker daemon is available and responding."""
+    try:
+        r = subprocess.run(
+            ["docker", "info"], capture_output=True, timeout=10,
+        )
+        return r.returncode == 0
+    except (FileNotFoundError, subprocess.TimeoutExpired):
+        return False
+
+
+@pytest.mark.skipif(not _docker_healthy(), reason="Docker daemon not available")
 class TestDockerBuild:
     """Verify the Docker image actually builds successfully."""
 
@@ -75,6 +87,7 @@ class TestDockerBuild:
         assert result.returncode == 0
 
 
+@pytest.mark.skipif(not _docker_healthy(), reason="Docker daemon not available")
 class TestServerStartup:
     """Verify the server actually starts and responds to health checks."""
 
@@ -171,6 +184,7 @@ class TestServerStartup:
             assert resp.status_code != 200
 
 
+@pytest.mark.skipif(not _docker_healthy(), reason="Docker daemon not available")
 class TestAuthMiddleware:
     """Test auth using the real running server."""
 

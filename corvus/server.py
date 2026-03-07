@@ -97,7 +97,7 @@ async def lifespan(_app: FastAPI) -> AsyncGenerator[None]:
 
     try:
         await runtime.litellm_manager.start(Path("config/models.yaml"))
-    except (RuntimeError, TimeoutError, FileNotFoundError) as exc:
+    except Exception as exc:
         logger.warning("LiteLLM proxy failed to start, using config-based routing: %s", exc)
     runtime.model_router.discover_models()
 

@@ -266,6 +266,9 @@ class TestServerStopHookWiring:
         assert "try:" in after_disconnect
         assert "except Exception:" in after_disconnect or "except Exception as" in after_disconnect
 
-    def test_server_collects_messages_in_transcript(self, chat_session_source):
-        """CONTRACT: ChatSession appends messages to transcript."""
-        assert "transcript.messages.append" in chat_session_source
+    def test_server_collects_messages_in_transcript(self):
+        """CONTRACT: Decomposed modules append messages to transcript."""
+        dispatch_source = (ROOT / "corvus" / "gateway" / "dispatch_orchestrator.py").read_text()
+        run_source = (ROOT / "corvus" / "gateway" / "run_executor.py").read_text()
+        combined = dispatch_source + run_source
+        assert "transcript.messages.append" in combined

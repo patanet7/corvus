@@ -56,7 +56,7 @@ def client(_gateway_env) -> TestClient:
     # Import here so env vars are set first
     from corvus.server import app
 
-    return TestClient(app)
+    return TestClient(app, headers={"X-Remote-User": "testuser"})
 
 
 # ---------------------------------------------------------------------------
@@ -96,16 +96,23 @@ class TestHealthEndpoint:
 class TestWebSocketAuth:
     """Verify WebSocket auth is enforced before accept."""
 
-    def test_ws_rejects_no_auth_header(self, client: TestClient) -> None:
+    @pytest.fixture()
+    def bare_client(self, _gateway_env) -> TestClient:
+        """TestClient without default auth headers for auth-rejection tests."""
+        from corvus.server import app
+
+        return TestClient(app)
+
+    def test_ws_rejects_no_auth_header(self, bare_client: TestClient) -> None:
         """WebSocket without X-Remote-User header should be rejected."""
         with pytest.raises((WebSocketDisconnect, RuntimeError)):
-            with client.websocket_connect("/ws"):
+            with bare_client.websocket_connect("/ws"):
                 pass
 
-    def test_ws_rejects_unknown_user(self, client: TestClient) -> None:
+    def test_ws_rejects_unknown_user(self, bare_client: TestClient) -> None:
         """WebSocket with unknown user should be rejected."""
         with pytest.raises((WebSocketDisconnect, RuntimeError)):
-            with client.websocket_connect("/ws", headers={"X-Remote-User": "hacker"}):
+            with bare_client.websocket_connect("/ws", headers={"X-Remote-User": "hacker"}):
                 pass
 
     def test_ws_accepts_allowed_user(self, client: TestClient) -> None:
