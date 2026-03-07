@@ -76,3 +76,7 @@ run = "mkdir -p tests/output && ts=$(date +%Y%m%d-%H%M%S) && cd frontend && pnpm
 [tasks."test:frontend:e2e:live:log"]
 description = "Run live frontend e2e tests (backend-enabled) and write log to tests/output/"
 run = "mkdir -p tests/output && ts=$(date +%Y%m%d-%H%M%S) && cd frontend && pnpm test:e2e:live 2>&1 | tee ../tests/output/test-frontend-e2e-live-$ts.log"
+
+[tasks.chat]
+description = "Interactive agent REPL"
+run = "uv run python -m corvus.cli.chat"
