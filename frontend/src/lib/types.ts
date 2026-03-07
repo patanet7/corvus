@@ -212,20 +212,6 @@ export type AgentStatus = 'idle' | 'thinking' | 'streaming' | 'done' | 'error';
 
 export type ConnectionStatus = 'connected' | 'connecting' | 'disconnected' | 'error';
 
-/** Well-known agent names for built-in defaults. Backend is the source of truth. */
-export const WELL_KNOWN_AGENTS = [
-	'personal',
-	'work',
-	'homelab',
-	'finance',
-	'email',
-	'docs',
-	'music',
-	'home',
-	'huginn',
-	'general'
-] as const;
-
 export type AgentName = string;
 
 /** Validate agent name against optional live agent list, or by format. */

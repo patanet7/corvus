@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import type { ServerMessage, ClientMessage } from './types';
-import { WELL_KNOWN_AGENTS, isValidAgentName } from './types';
+import { isValidAgentName } from './types';
 import { GatewayClient } from './ws';
 
 describe('Protocol types', () => {
@@ -237,22 +237,6 @@ describe('Protocol types', () => {
 			expect(completeMsg.result).toBe('success');
 			expect(completeMsg.cost_usd).toBe(0.05);
 		}
-	});
-});
-
-describe('Agent constants', () => {
-	it('WELL_KNOWN_AGENTS has all 10 agents', () => {
-		expect(WELL_KNOWN_AGENTS).toHaveLength(10);
-		expect(WELL_KNOWN_AGENTS).toContain('personal');
-		expect(WELL_KNOWN_AGENTS).toContain('work');
-		expect(WELL_KNOWN_AGENTS).toContain('homelab');
-		expect(WELL_KNOWN_AGENTS).toContain('finance');
-		expect(WELL_KNOWN_AGENTS).toContain('email');
-		expect(WELL_KNOWN_AGENTS).toContain('docs');
-		expect(WELL_KNOWN_AGENTS).toContain('music');
-		expect(WELL_KNOWN_AGENTS).toContain('home');
-		expect(WELL_KNOWN_AGENTS).toContain('huginn');
-		expect(WELL_KNOWN_AGENTS).toContain('general');
 	});
 });
 

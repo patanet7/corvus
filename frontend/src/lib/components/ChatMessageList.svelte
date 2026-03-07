@@ -2,7 +2,6 @@
 	import { tick } from 'svelte';
 	import { CHAT_VISIBLE_WINDOW, nextVisibleCount } from '$lib/chat/visible-window';
 	import type { AgentInfo, AgentStatus, ChatMessage, ConnectionStatus, Task } from '$lib/types';
-	import { WELL_KNOWN_AGENTS } from '$lib/types';
 	import { getThemeContext } from '$lib/themes/context';
 	import AgentPortrait from './AgentPortrait.svelte';
 	import ChatRuntimeStatus from './ChatRuntimeStatus.svelte';
@@ -40,11 +39,7 @@
 		availableAgents = []
 	}: Props = $props();
 
-	const welcomeAgents = $derived(
-		availableAgents.length > 0
-			? availableAgents.filter((a) => a.id !== 'general')
-			: WELL_KNOWN_AGENTS.filter((n) => n !== 'general').map((n) => ({ id: n, label: n, description: undefined } as AgentInfo))
-	);
+	const welcomeAgents = $derived(availableAgents.filter((a) => a.id !== 'general'));
 	const themeCtx = getThemeContext();
 	const chatMaxWidth = $derived(themeCtx.theme.components.chatPanel.maxWidth);
 	const messagePadding = $derived(themeCtx.theme.components.chatPanel.messagePadding);
