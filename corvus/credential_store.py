@@ -22,6 +22,8 @@ import subprocess
 import time
 from pathlib import Path
 
+from importlib import import_module
+
 from corvus.auth.openai_oauth import refresh_access_token
 from corvus.auth.profile_resolver import resolve_profile
 from corvus.auth.profiles import (
@@ -30,12 +32,23 @@ from corvus.auth.profiles import (
     OAuthCredential,
     TokenCredential,
 )
-from corvus.tools.firefly import configure as configure_firefly
-from corvus.tools.ha import configure as configure_ha
-from corvus.tools.obsidian import configure as configure_obsidian
-from corvus.tools.paperless import configure as configure_paperless
 
 logger = logging.getLogger(__name__)
+
+# ---------------------------------------------------------------------------
+# Service tool registry — maps credential store keys to tool configure calls.
+#
+# Each entry: (service_key, module_path, configure_func_name, arg_mapping)
+# arg_mapping: {credential_field: kwarg_name_for_configure}
+#
+# To add a new service tool, add an entry here. No other code changes needed.
+# ---------------------------------------------------------------------------
+SERVICE_TOOL_REGISTRY: list[tuple[str, str, str, dict[str, str]]] = [
+    ("ha", "corvus.tools.ha", "configure", {"url": "ha_url", "token": "ha_token"}),
+    ("paperless", "corvus.tools.paperless", "configure", {"url": "paperless_url", "token": "paperless_token"}),
+    ("firefly", "corvus.tools.firefly", "configure", {"url": "firefly_url", "token": "firefly_token"}),
+    ("obsidian", "corvus.tools.obsidian", "configure", {"url": "base_url", "token": "api_key"}),
+]
 
 
 def mask_value(value: str | None, visible_chars: int = 8) -> str:
@@ -264,26 +277,21 @@ class CredentialStore:
                 os.environ["OPENAI_COMPAT_API_KEY"] = compat["api_key"]
 
     def _inject_services(self) -> None:
-        """Inject service credentials (HA, Paperless, Firefly, Obsidian)."""
-        if "ha" in self._data:
-            ha = self._data["ha"]
-            if ha.get("url") and ha.get("token"):
-                configure_ha(ha_url=ha["url"], ha_token=ha["token"])
-
-        if "paperless" in self._data:
-            p = self._data["paperless"]
-            if p.get("url") and p.get("token"):
-                configure_paperless(paperless_url=p["url"], paperless_token=p["token"])
-
-        if "firefly" in self._data:
-            f = self._data["firefly"]
-            if f.get("url") and f.get("token"):
-                configure_firefly(firefly_url=f["url"], firefly_token=f["token"])
-
-        if "obsidian" in self._data:
-            o = self._data["obsidian"]
-            if o.get("url") and o.get("token"):
-                configure_obsidian(o["url"], o["token"])
+        """Inject service credentials using the service tool registry."""
+        for svc_key, module_path, func_name, arg_mapping in SERVICE_TOOL_REGISTRY:
+            if svc_key not in self._data:
+                continue
+            svc_data = self._data[svc_key]
+            # All credential fields must be present
+            if not all(svc_data.get(field) for field in arg_mapping):
+                continue
+            try:
+                module = import_module(module_path)
+                configure_fn = getattr(module, func_name)
+                kwargs = {kwarg: svc_data[field] for field, kwarg in arg_mapping.items()}
+                configure_fn(**kwargs)
+            except Exception as exc:
+                logger.warning("Failed to configure %s: %s", svc_key, exc)
 
     @classmethod
     def from_env(cls) -> CredentialStore:
