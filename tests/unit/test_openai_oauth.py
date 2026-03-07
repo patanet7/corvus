@@ -174,3 +174,43 @@ class TestRefreshAccessToken:
         assert result.refresh_token == "new_refresh_xyz"
         assert result.account_id == "acc_refreshed"
         assert result.expires > int(time.time())
+
+    def test_refresh_preserves_old_token_when_not_rotated(self) -> None:
+        """When response omits refresh_token, the old one must be preserved."""
+        new_access = _make_fake_jwt({
+            "https://api.openai.com/auth": {"chatgpt_account_id": "acc_kept"},
+        })
+        # Response deliberately omits refresh_token
+        response_body = json.dumps({
+            "access_token": new_access,
+            "expires_in": 3600,
+        }).encode()
+
+        class Handler(BaseHTTPRequestHandler):
+            def do_POST(self):
+                content = response_body
+                self.send_response(200)
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Content-Length", str(len(content)))
+                self.end_headers()
+                self.wfile.write(content)
+
+            def log_message(self, *args):
+                pass
+
+        server = HTTPServer(("127.0.0.1", 0), Handler)
+        port = server.server_address[1]
+        thread = Thread(target=server.handle_request, daemon=True)
+        thread.start()
+
+        try:
+            result = refresh_access_token(
+                refresh_token="my_original_refresh",
+                token_url=f"http://127.0.0.1:{port}/oauth/token",
+            )
+        finally:
+            server.server_close()
+            thread.join(timeout=2)
+
+        assert result.refresh_token == "my_original_refresh"
+        assert result.access_token == new_access
