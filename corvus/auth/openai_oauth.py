@@ -152,3 +152,59 @@ def exchange_code_for_tokens(
         expires=expires,
         account_id=account_id,
     )
+
+
+def refresh_access_token(
+    *,
+    refresh_token: str,
+    token_url: str = OPENAI_TOKEN_URL,
+) -> OAuthTokens:
+    """Refresh an expired access token using the refresh_token grant.
+
+    Args:
+        refresh_token: The refresh token from a previous exchange.
+        token_url: The token endpoint URL (override for testing).
+
+    Returns:
+        OAuthTokens with fresh access_token, refresh_token, expires, account_id.
+
+    Raises:
+        RuntimeError: If the refresh fails.
+    """
+    body = urlencode({
+        "grant_type": "refresh_token",
+        "client_id": CODEX_CLIENT_ID,
+        "refresh_token": refresh_token,
+    }).encode("utf-8")
+
+    req = Request(
+        token_url,
+        data=body,
+        headers={"Content-Type": "application/x-www-form-urlencoded"},
+        method="POST",
+    )
+
+    try:
+        with urlopen(req, timeout=30) as resp:
+            data = json.loads(resp.read())
+    except urllib.error.HTTPError as exc:
+        raise RuntimeError(f"Token refresh failed: HTTP {exc.code}") from exc
+    except urllib.error.URLError as exc:
+        raise RuntimeError(f"Token refresh failed: {exc.reason}") from exc
+    except json.JSONDecodeError as exc:
+        raise RuntimeError("Token refresh failed: invalid JSON response") from exc
+
+    access_token = data.get("access_token")
+    if not access_token:
+        raise RuntimeError("Token refresh failed: no access_token in response")
+    new_refresh = data.get("refresh_token", refresh_token)
+    expires_in = data.get("expires_in", 3600)
+    expires = int(time.time()) + expires_in
+    account_id = decode_jwt_account_id(access_token)
+
+    return OAuthTokens(
+        access_token=access_token,
+        refresh_token=new_refresh,
+        expires=expires,
+        account_id=account_id,
+    )

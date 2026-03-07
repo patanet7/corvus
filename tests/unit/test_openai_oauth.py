@@ -13,6 +13,7 @@ from corvus.auth.openai_oauth import (
     decode_jwt_account_id,
     exchange_code_for_tokens,
     generate_pkce,
+    refresh_access_token,
 )
 
 
@@ -101,6 +102,7 @@ class TestExchangeCodeForTokens:
             def do_POST(self):
                 self.send_response(200)
                 self.send_header("Content-Type", "application/json")
+                self.send_header("Content-Length", str(len(response_body)))
                 self.end_headers()
                 self.wfile.write(response_body)
 
@@ -126,4 +128,49 @@ class TestExchangeCodeForTokens:
         assert result.access_token == fake_access
         assert result.refresh_token == "refresh_xyz"
         assert result.account_id == "acc_test"
+        assert result.expires > int(time.time())
+
+
+class TestRefreshAccessToken:
+    """Tests for OAuth token refresh."""
+
+    def test_refresh_returns_new_tokens(self) -> None:
+        """Must POST to token endpoint with refresh_token grant and return new tokens."""
+        new_access = _make_fake_jwt({
+            "https://api.openai.com/auth": {"chatgpt_account_id": "acc_refreshed"},
+        })
+        response_body = json.dumps({
+            "access_token": new_access,
+            "refresh_token": "new_refresh_xyz",
+            "expires_in": 7200,
+        }).encode()
+
+        class Handler(BaseHTTPRequestHandler):
+            def do_POST(self):
+                self.send_response(200)
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Content-Length", str(len(response_body)))
+                self.end_headers()
+                self.wfile.write(response_body)
+
+            def log_message(self, *args):
+                pass
+
+        server = HTTPServer(("127.0.0.1", 0), Handler)
+        port = server.server_address[1]
+        thread = Thread(target=server.handle_request, daemon=True)
+        thread.start()
+
+        try:
+            result = refresh_access_token(
+                refresh_token="old_refresh",
+                token_url=f"http://127.0.0.1:{port}/oauth/token",
+            )
+        finally:
+            server.server_close()
+            thread.join(timeout=2)
+
+        assert result.access_token == new_access
+        assert result.refresh_token == "new_refresh_xyz"
+        assert result.account_id == "acc_refreshed"
         assert result.expires > int(time.time())
