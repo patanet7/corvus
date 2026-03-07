@@ -161,6 +161,11 @@ class ModelRouter:
         agent_cfg = self._agents.get(agent_name, {})
         return list(agent_cfg.get("fallbacks", []))
 
+    def get_auth_profile(self, agent_name: str) -> str | None:
+        """Return the pinned auth profile for an agent, or None."""
+        agent_cfg = self._agents.get(agent_name, {})
+        return agent_cfg.get("auth_profile")
+
     # --- Backend resolution ---
 
     def get_backend(self, agent_name: str) -> str:
