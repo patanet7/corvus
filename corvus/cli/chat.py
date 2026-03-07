@@ -197,8 +197,8 @@ def _handle_command(
     return None
 
 
-async def _repl(runtime: object, args: argparse.Namespace) -> None:
-    """Main REPL loop."""
+def _repl(runtime: object, args: argparse.Namespace) -> None:
+    """Main REPL loop (synchronous — prompt_toolkit manages its own event loop)."""
     from claude_agent_sdk import ClaudeSDKClient
 
     from corvus.cli.chat_render import format_agent_name, format_tool_call, render_info
@@ -279,21 +279,24 @@ async def _repl(runtime: object, args: argparse.Namespace) -> None:
             continue
 
         try:
-            await client.query(user_input)
-            async for msg in client.receive_response():
-                msg_type = getattr(msg, "type", None) or type(msg).__name__
-                if msg_type in ("text", "AssistantMessage"):
-                    content = getattr(msg, "content", "") or getattr(
-                        msg, "text", ""
-                    )
-                    if content:
-                        print(f"\n  {content}")
-                elif msg_type in ("tool_use", "ToolUseMessage"):
-                    tool_name = getattr(msg, "name", "unknown")
-                    tool_input = getattr(msg, "input", {})
-                    print(format_tool_call(tool_name, tool_input))
+            asyncio.run(_send_and_receive(client, user_input, format_tool_call))
         except Exception as exc:
             print(f"\n  \033[31mError: {exc}\033[0m")
+
+
+async def _send_and_receive(client: object, user_input: str, format_tool_call: object) -> None:
+    """Send a message and stream the response (async helper for REPL)."""
+    await client.query(user_input)  # type: ignore[attr-defined]
+    async for msg in client.receive_response():  # type: ignore[attr-defined]
+        msg_type = getattr(msg, "type", None) or type(msg).__name__
+        if msg_type in ("text", "AssistantMessage"):
+            content = getattr(msg, "content", "") or getattr(msg, "text", "")
+            if content:
+                print(f"\n  {content}")
+        elif msg_type in ("tool_use", "ToolUseMessage"):
+            tool_name = getattr(msg, "name", "unknown")
+            tool_input = getattr(msg, "input", {})
+            print(format_tool_call(tool_name, tool_input))  # type: ignore[operator]
 
 
 def main() -> None:
@@ -313,7 +316,7 @@ def main() -> None:
         _handle_list_models(runtime)
         return
 
-    asyncio.run(_repl(runtime, args))
+    _repl(runtime, args)
 
 
 if __name__ == "__main__":
