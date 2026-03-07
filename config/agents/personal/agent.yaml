@@ -9,8 +9,6 @@ models:
   fallback: null
   auto: true
   complexity: medium
-prompt_file: corvus/prompts/personal.md
-soul_file: corvus/prompts/souls/personal.md
 tools:
   builtin:
     - Bash

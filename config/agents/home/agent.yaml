@@ -8,8 +8,6 @@ models:
   fallback: null
   auto: true
   complexity: low
-prompt_file: corvus/prompts/home.md
-soul_file: corvus/prompts/souls/home.md
 tools:
   builtin: []
   modules:

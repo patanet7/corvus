@@ -8,8 +8,6 @@ models:
   fallback: null
   auto: true
   complexity: low
-prompt_file: corvus/prompts/music.md
-soul_file: corvus/prompts/souls/music.md
 tools:
   builtin:
     - Bash

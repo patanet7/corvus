@@ -9,8 +9,6 @@ models:
   fallback: null
   auto: true
   complexity: high
-prompt_file: corvus/prompts/homelab.md
-soul_file: corvus/prompts/souls/homelab.md
 tools:
   builtin:
     - Bash

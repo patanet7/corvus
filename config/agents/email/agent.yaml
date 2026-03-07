@@ -8,8 +8,6 @@ models:
   fallback: null
   auto: true
   complexity: medium
-prompt_file: corvus/prompts/email.md
-soul_file: corvus/prompts/souls/email.md
 tools:
   builtin:
     - Bash

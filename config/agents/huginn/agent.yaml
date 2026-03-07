@@ -1,17 +1,13 @@
-name: general
+name: huginn
 description: >
-  Cross-domain planning, daily overview, weekly review, multi-topic
-  questions, general conversation, thinking through decisions,
-  summarizing across domains, questions about past conversations,
-  and anything that spans more than one specific domain
+  Corvus mission-control assistant identity. Use for top-level orchestration,
+  system guidance, and explicit user-directed routing across domains.
 enabled: true
 models:
   preferred: null
   fallback: null
   auto: true
   complexity: medium
-prompt_file: corvus/prompts/general.md
-soul_file: corvus/prompts/souls/general.md
 tools:
   builtin:
     - Bash
