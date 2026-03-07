@@ -1,7 +1,8 @@
 """Model backends configuration screen.
 
-Five toggleable backend sections: Claude, OpenAI, Ollama, Kimi, OpenAI-compatible.
+Six toggleable backend sections: Claude, OpenAI, Codex, Ollama, Kimi, OpenAI-compatible.
 All toggles off by default. Each backend shows input fields when enabled.
+Codex uses OAuth (browser-based login) instead of text API key fields.
 """
 
 from textual.app import ComposeResult
@@ -25,6 +26,11 @@ BACKENDS = [
         [
             ("api-key", "API key (sk-...)", True, ""),
         ],
+    ),
+    (
+        "codex",
+        "OpenAI Codex (ChatGPT subscription)",
+        [],  # No text fields — uses OAuth button
     ),
     (
         "ollama",
@@ -66,6 +72,8 @@ def _validate_backend(backend_id: str, fields: dict[str, str]) -> tuple[bool, st
         if not key.startswith("sk-"):
             return False, "Must start with sk-"
         return True, ""
+    if backend_id == "codex":
+        return True, ""
     if backend_id == "ollama":
         url = fields.get("base-url", "")
         if not url.startswith(("http://", "https://")):
@@ -105,6 +113,13 @@ class ModelBackendsScreen(Screen):
                             password=is_password,
                             value=default,
                         )
+                    if backend_id == "codex":
+                        yield Button(
+                            "Sign in with ChatGPT",
+                            id="codex-oauth-btn",
+                            variant="success",
+                        )
+                        yield Static("", id="codex-oauth-status")
                 yield Static("", id=f"validation-{backend_id}")
 
         yield Button("\u2190 Back", id="back-btn")
@@ -141,7 +156,55 @@ class ModelBackendsScreen(Screen):
                 result[backend_id] = field_values
         return result
 
+    def _run_codex_oauth(self) -> None:
+        """Run the Codex OAuth flow in a background thread."""
+        import webbrowser
+        from threading import Thread
+
+        from corvus.auth.openai_oauth import (
+            build_authorize_url,
+            exchange_code_for_tokens,
+            generate_pkce,
+            run_callback_server,
+        )
+
+        status = self.query_one("#codex-oauth-status", Static)
+        status.update("Starting OAuth flow...")
+
+        pkce = generate_pkce()
+        server, get_result = run_callback_server()
+
+        def _flow() -> None:
+            url = build_authorize_url(pkce)
+            webbrowser.open(url)
+            server.handle_request()
+            server.server_close()
+            result = get_result()
+            if result.get("code") and result.get("state") == pkce.state:
+                try:
+                    tokens = exchange_code_for_tokens(
+                        code=result["code"],
+                        verifier=pkce.verifier,
+                    )
+                    self.app._codex_tokens = tokens  # type: ignore[attr-defined]
+                    self.app.call_from_thread(
+                        status.update, "Authenticated successfully!"
+                    )
+                except Exception as exc:
+                    self.app.call_from_thread(
+                        status.update, f"OAuth failed: {exc}"
+                    )
+            else:
+                self.app.call_from_thread(
+                    status.update, "OAuth failed: state mismatch or missing code"
+                )
+
+        Thread(target=_flow, daemon=True).start()
+
     def on_button_pressed(self, event: Button.Pressed) -> None:
+        if event.button.id == "codex-oauth-btn":
+            self._run_codex_oauth()
+            return
         if event.button.id == "back-btn":
             self.app.pop_screen()
         elif event.button.id == "skip-btn":

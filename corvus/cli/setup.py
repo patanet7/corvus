@@ -97,6 +97,14 @@ class ClawSetupApp(App):
                 cred_key = key_map.get(field_key, field_key)
                 store.set(store_key, cred_key, value)
 
+        # Codex OAuth tokens (stored by OAuth flow, not by text fields)
+        if hasattr(self, "_codex_tokens"):
+            tokens = self._codex_tokens
+            store.set("codex", "access_token", tokens.access_token)
+            store.set("codex", "refresh_token", tokens.refresh_token)
+            store.set("codex", "expires", str(tokens.expires))
+            store.set("codex", "account_id", tokens.account_id)
+
         # Save service credentials
         if hasattr(self, "_services_data"):
             for svc_id, svc_data in self._services_data.items():
