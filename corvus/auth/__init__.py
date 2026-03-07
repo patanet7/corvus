@@ -1,6 +1,6 @@
-"""Authelia trusted-proxy authentication middleware.
+"""Auth module — OAuth flows, token management, and authentication middleware.
 
-SWAG + Authelia passes X-Remote-User header after SSO authentication.
+Includes Authelia trusted-proxy middleware and OpenAI PKCE OAuth flow.
 """
 
 from fastapi import HTTPException, Request
