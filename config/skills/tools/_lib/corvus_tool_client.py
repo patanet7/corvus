@@ -13,6 +13,9 @@ import os
 import socket
 import sys
 
+# Max response size (10 MB) to prevent memory exhaustion from a rogue server.
+_MAX_RESPONSE_BYTES = 10 * 1024 * 1024
+
 
 def call_tool(tool_name: str, params: dict) -> dict:
     """Call the corvus tool server over Unix socket.
@@ -51,6 +54,8 @@ def call_tool(tool_name: str, params: dict) -> dict:
             if not chunk:
                 break
             response += chunk
+            if len(response) > _MAX_RESPONSE_BYTES:
+                return {"ok": False, "error": "response too large"}
         return json.loads(response.decode())
     except socket.timeout:
         return {"ok": False, "error": "tool server timeout"}

@@ -8,7 +8,6 @@ from __future__ import annotations
 import asyncio
 import json
 import os
-import socket
 import sys
 import tempfile
 import threading
@@ -16,7 +15,6 @@ from pathlib import Path
 
 import pytest
 
-from corvus.cli.tool_server import ToolServer
 from corvus.cli.tool_token import create_token
 
 
@@ -25,7 +23,7 @@ def _make_secret() -> bytes:
 
 
 @pytest.fixture()
-def tool_client_module(tmp_path: Path):
+def tool_client_module():
     """Import the tool client from config/skills/tools/_lib/."""
     lib_path = Path(__file__).resolve().parents[2] / "config" / "skills" / "tools" / "_lib"
     sys.path.insert(0, str(lib_path))
@@ -58,7 +56,6 @@ class TestToolClientCall:
         monkeypatch.setenv("CORVUS_TOOL_SOCKET", sock_path)
         monkeypatch.setenv("CORVUS_TOOL_TOKEN", token)
 
-        # Start a minimal echo server that returns a canned response
         loop = asyncio.new_event_loop()
         started = threading.Event()
 
@@ -71,11 +68,9 @@ class TestToolClientCall:
 
         def _run():
             server_coro = asyncio.start_unix_server(_echo_handler, path=sock_path)
-            server = loop.run_until_complete(server_coro)
+            loop.run_until_complete(server_coro)
             started.set()
             loop.run_forever()
-            server.close()
-            loop.run_until_complete(server.wait_closed())
 
         t = threading.Thread(target=_run, daemon=True)
         t.start()

@@ -24,10 +24,6 @@ from corvus.cli.tool_token import validate_token
 
 logger = logging.getLogger("corvus-tool-server")
 
-# Module name → tool_name → callable mapping.
-# Populated lazily via _populate_tool_registry().
-_TOOL_REGISTRY: dict[str, dict[str, Any]] = {}
-
 # Known module prefixes for tool name → module extraction.
 # Ordered longest-first so "paperless" matches before a hypothetical "paper".
 _MODULE_PREFIXES = [
@@ -40,20 +36,21 @@ _MODULE_PREFIXES = [
     "ha",
 ]
 
+# Max request size (64 KB) to prevent memory exhaustion.
+_MAX_REQUEST_BYTES = 64 * 1024
 
-def _populate_tool_registry(module_configs: dict[str, dict]) -> None:
-    """Populate the tool registry from module configs.
 
-    Reuses the same module registration pattern as mcp_bridge.py.
-    Only configures and loads tools for modules in module_configs.
+def _build_tool_registry(module_configs: dict[str, dict]) -> dict[str, dict[str, Any]]:
+    """Build a tool registry from module configs.
+
+    Returns a new dict (not a module-global) so each ToolServer instance
+    gets its own isolated registry.
     """
-    if _TOOL_REGISTRY:
-        return
-
     from corvus.cli.mcp_bridge import _MODULE_REGISTRY, _populate_module_registry
 
     _populate_module_registry()
 
+    registry: dict[str, dict[str, Any]] = {}
     for module_name, module_cfg in module_configs.items():
         entry = _MODULE_REGISTRY.get(module_name)
         if entry is None:
@@ -68,13 +65,15 @@ def _populate_tool_registry(module_configs: dict[str, dict]) -> None:
             continue
 
         tools = create_tools_fn(module_cfg)
-        _TOOL_REGISTRY[module_name] = {}
+        registry[module_name] = {}
         for tool_name, tool_fn in tools:
-            _TOOL_REGISTRY[module_name][tool_name] = tool_fn
+            registry[module_name][tool_name] = tool_fn
+
+    return registry
 
 
-def _register_memory_tools(agent_name: str, memory_domain: str) -> None:
-    """Register memory tools into the tool registry."""
+def _build_memory_tools(agent_name: str, memory_domain: str) -> dict[str, Any]:
+    """Build memory tools dict for the registry."""
     from corvus.config import MEMORY_CONFIG, MEMORY_DB
     from corvus.memory import MemoryConfig, MemoryHub
     from corvus.memory.toolkit import create_memory_toolkit
@@ -96,16 +95,16 @@ def _register_memory_tools(agent_name: str, memory_domain: str) -> None:
     hub.set_resolvers(_bridge_memory_access, _bridge_readable_domains)
 
     memory_tools = create_memory_toolkit(hub, agent_name=agent_name, own_domain=memory_domain)
-    _TOOL_REGISTRY["memory"] = {}
-    for mem_tool in memory_tools:
-        _TOOL_REGISTRY["memory"][mem_tool.name] = mem_tool.fn
+    return {mem_tool.name: mem_tool.fn for mem_tool in memory_tools}
 
 
 class ToolServer:
     """Unix socket tool server with JWT authentication.
 
+    Each instance maintains its own tool registry — no shared global state.
+
     Args:
-        secret: HMAC secret for JWT validation.
+        secret: HMAC secret for JWT validation (>= 32 bytes).
         socket_path: Path for the Unix domain socket.
         module_configs: Dict of module_name -> config for tool registration.
         agent_name: Agent name for memory tool scoping.
@@ -127,6 +126,7 @@ class ToolServer:
         self._agent_name = agent_name
         self._memory_domain = memory_domain
         self._server: asyncio.AbstractServer | None = None
+        self._registry: dict[str, dict[str, Any]] = {}
 
     def _extract_module(self, tool_name: str) -> str:
         """Extract module name from a tool name like 'obsidian_search' → 'obsidian'."""
@@ -143,8 +143,13 @@ class ToolServer:
     ) -> None:
         """Handle a single client connection."""
         try:
-            data = await asyncio.wait_for(reader.readline(), timeout=30)
-            if not data:
+            data = await asyncio.wait_for(
+                reader.readuntil(b"\n"), timeout=30
+            )
+            if not data or len(data) > _MAX_REQUEST_BYTES:
+                response = {"ok": False, "error": "request_too_large"}
+                writer.write(json.dumps(response).encode())
+                await writer.drain()
                 return
 
             try:
@@ -158,10 +163,22 @@ class ToolServer:
             response = await self._dispatch(request)
             writer.write(json.dumps(response).encode())
             await writer.drain()
+        except asyncio.IncompleteReadError:
+            pass  # Client disconnected before sending newline
+        except asyncio.LimitOverrunError:
+            response = {"ok": False, "error": "request_too_large"}
+            try:
+                writer.write(json.dumps(response).encode())
+                await writer.drain()
+            except Exception:
+                pass
         except asyncio.TimeoutError:
             response = {"ok": False, "error": "timeout"}
-            writer.write(json.dumps(response).encode())
-            await writer.drain()
+            try:
+                writer.write(json.dumps(response).encode())
+                await writer.drain()
+            except Exception:
+                pass
         except Exception as exc:
             logger.exception("Connection handler error: %s", exc)
             response = {"ok": False, "error": "internal_error"}
@@ -187,20 +204,24 @@ class ToolServer:
         try:
             payload = validate_token(secret=self._secret, token=token)
         except ValueError as exc:
-            return {"ok": False, "error": f"auth_failed: {exc}"}
+            logger.debug("Auth failed: %s", exc)
+            return {"ok": False, "error": "auth_failed"}
 
         # 2. Extract tool info
         tool_name = request.get("tool", "")
         params = request.get("params", {})
         module = self._extract_module(tool_name)
 
-        # 3. Check module authorization
+        # 3. Filter dangerous parameter keys
+        params = {k: v for k, v in params.items() if not k.startswith("_")}
+
+        # 4. Check module authorization
         allowed_modules = payload.get("modules", [])
         if module not in allowed_modules:
             return {"ok": False, "error": "not_authorized"}
 
-        # 4. Look up and call tool
-        module_tools = _TOOL_REGISTRY.get(module)
+        # 5. Look up and call tool
+        module_tools = self._registry.get(module)
         if module_tools is None:
             return {"ok": False, "error": f"unknown_module: {module}"}
 
@@ -209,7 +230,6 @@ class ToolServer:
             return {"ok": False, "error": f"unknown_tool: {tool_name}"}
 
         try:
-            # Some tools are async (memory), some are sync (obsidian, ha, etc.)
             if asyncio.iscoroutinefunction(tool_fn):
                 result = await tool_fn(**params)
             else:
@@ -226,10 +246,12 @@ class ToolServer:
         if sock_path.exists():
             sock_path.unlink()
 
-        # Register tools (only for modules in config)
-        _populate_tool_registry(self._module_configs)
+        # Build instance-level tool registry
+        self._registry = _build_tool_registry(self._module_configs)
         if self._agent_name:
-            _register_memory_tools(self._agent_name, self._memory_domain)
+            self._registry["memory"] = _build_memory_tools(
+                self._agent_name, self._memory_domain
+            )
 
         self._server = await asyncio.start_unix_server(
             self._handle_connection,
@@ -238,8 +260,8 @@ class ToolServer:
         # Set restrictive permissions on the socket file
         try:
             os.chmod(self._socket_path, 0o600)
-        except OSError:
-            pass  # macOS may not honor chmod on sockets
+        except OSError as exc:
+            logger.warning("Failed to set socket permissions: %s", exc)
 
         logger.info("Tool server listening on %s", self._socket_path)
 
@@ -257,4 +279,5 @@ class ToolServer:
             except OSError:
                 pass
 
+        self._registry.clear()
         logger.info("Tool server stopped, socket removed")

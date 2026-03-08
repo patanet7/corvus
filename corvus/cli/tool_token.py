@@ -18,6 +18,13 @@ import json
 import time
 
 
+_MIN_SECRET_LEN = 32
+
+_HEADER_B64 = base64.urlsafe_b64encode(
+    json.dumps({"alg": "HS256", "typ": "CVT"}).encode()
+).rstrip(b"=").decode("ascii")
+
+
 def _b64encode(data: bytes) -> str:
     """URL-safe base64 encode without padding."""
     return base64.urlsafe_b64encode(data).rstrip(b"=").decode("ascii")
@@ -41,24 +48,30 @@ def create_token(
     """Create an agent-scoped token.
 
     Args:
-        secret: Random bytes for HMAC signing (>= 32 bytes recommended).
+        secret: Random bytes for HMAC signing (>= 32 bytes).
         agent: Agent name baked into the token.
         modules: List of allowed tool module names.
-        ttl_seconds: Seconds until the token expires.
+        ttl_seconds: Seconds until the token expires (must be positive).
 
     Returns:
         Signed token string in header.payload.signature format.
+
+    Raises:
+        ValueError: If secret is too short or ttl_seconds is not positive.
     """
-    header = _b64encode(json.dumps({"alg": "HS256", "typ": "CVT"}).encode())
+    if len(secret) < _MIN_SECRET_LEN:
+        raise ValueError(f"secret must be >= {_MIN_SECRET_LEN} bytes")
+    if ttl_seconds <= 0:
+        raise ValueError("ttl_seconds must be positive")
     payload_dict = {
         "agent": agent,
         "modules": modules,
         "exp": int(time.time()) + ttl_seconds,
     }
     payload = _b64encode(json.dumps(payload_dict).encode())
-    signing_input = f"{header}.{payload}".encode()
+    signing_input = f"{_HEADER_B64}.{payload}".encode()
     signature = _b64encode(hmac.new(secret, signing_input, hashlib.sha256).digest())
-    return f"{header}.{payload}.{signature}"
+    return f"{_HEADER_B64}.{payload}.{signature}"
 
 
 def validate_token(*, secret: bytes, token: str) -> dict:
@@ -74,11 +87,22 @@ def validate_token(*, secret: bytes, token: str) -> dict:
     Raises:
         ValueError: If the token is malformed, expired, or has an invalid signature.
     """
+    if len(secret) < _MIN_SECRET_LEN:
+        raise ValueError(f"secret must be >= {_MIN_SECRET_LEN} bytes")
+
     parts = token.split(".")
     if len(parts) != 3:
         raise ValueError("malformed token: expected 3 parts")
 
     header_b64, payload_b64, signature_b64 = parts
+
+    # Validate header
+    try:
+        header = json.loads(_b64decode(header_b64))
+    except Exception as exc:
+        raise ValueError(f"malformed header: {exc}") from exc
+    if header.get("alg") != "HS256":
+        raise ValueError("unsupported algorithm")
 
     # Verify signature
     signing_input = f"{header_b64}.{payload_b64}".encode()

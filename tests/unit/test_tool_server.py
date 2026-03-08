@@ -10,8 +10,6 @@ import asyncio
 import json
 import os
 import socket
-import tempfile
-import threading
 from pathlib import Path
 
 import pytest
@@ -19,48 +17,11 @@ import pytest
 from corvus.cli.tool_server import ToolServer
 from corvus.cli.tool_token import create_token
 
+# Fixtures (short_sock_path, server_ctx) auto-discovered from conftest.py.
+
 
 def _make_secret() -> bytes:
     return os.urandom(32)
-
-
-@pytest.fixture()
-def short_sock_path():
-    """Provide a short socket path that fits macOS 104-byte AF_UNIX limit."""
-    tmpdir = tempfile.mkdtemp(prefix="cvs")
-    path = os.path.join(tmpdir, "s.sock")
-    yield path
-    # Cleanup
-    if os.path.exists(path):
-        os.unlink(path)
-    if os.path.exists(tmpdir):
-        os.rmdir(tmpdir)
-
-
-@pytest.fixture()
-def server_ctx(short_sock_path):
-    """Start a ToolServer on a background event loop, yield (sock_path, secret, loop), then stop."""
-    secret = _make_secret()
-    server = ToolServer(secret=secret, socket_path=short_sock_path, module_configs={})
-
-    loop = asyncio.new_event_loop()
-    started = threading.Event()
-
-    def _run():
-        loop.run_until_complete(server.start())
-        started.set()
-        loop.run_forever()
-
-    t = threading.Thread(target=_run, daemon=True)
-    t.start()
-    started.wait(timeout=5)
-
-    yield short_sock_path, secret
-
-    loop.call_soon_threadsafe(loop.stop)
-    t.join(timeout=5)
-    loop.run_until_complete(server.stop())
-    loop.close()
 
 
 def _send_request(socket_path: str, request: dict) -> dict:
@@ -104,6 +65,7 @@ class TestToolServerAuth:
             {"tool": "obsidian_search", "params": {}, "token": bad_token},
         )
         assert result["ok"] is False
+        assert result["error"] == "auth_failed"
 
     def test_rejects_unauthorized_module(self, server_ctx) -> None:
         """Token for obsidian cannot call ha tools."""
@@ -122,19 +84,32 @@ class TestToolServerAuth:
         assert "not_authorized" in result["error"]
 
     def test_rejects_expired_token(self, server_ctx) -> None:
-        """Expired token is rejected."""
+        """Expired token is rejected with generic auth_failed."""
         sock_path, secret = server_ctx
-        token = create_token(
-            secret=secret,
-            agent="personal",
-            modules=["obsidian"],
-            ttl_seconds=-1,
-        )
+        # Construct expired token manually (create_token rejects ttl <= 0)
+        import hashlib
+        import hmac as hmac_mod
+        import time
+
+        from corvus.cli.tool_token import _b64encode
+
+        header = _b64encode(json.dumps({"alg": "HS256", "typ": "CVT"}).encode())
+        payload_dict = {
+            "agent": "personal",
+            "modules": ["obsidian"],
+            "exp": int(time.time()) - 10,
+        }
+        payload = _b64encode(json.dumps(payload_dict).encode())
+        signing_input = f"{header}.{payload}".encode()
+        sig = _b64encode(hmac_mod.new(secret, signing_input, hashlib.sha256).digest())
+        expired_token = f"{header}.{payload}.{sig}"
+
         result = _send_request(
             sock_path,
-            {"tool": "obsidian_search", "params": {"query": "test"}, "token": token},
+            {"tool": "obsidian_search", "params": {"query": "test"}, "token": expired_token},
         )
         assert result["ok"] is False
+        assert result["error"] == "auth_failed"
 
 
 class TestToolServerSocket:
@@ -167,7 +142,7 @@ class TestToolServerSocket:
 
 
 class TestToolServerDispatch:
-    """Tests for tool_name → module mapping."""
+    """Tests for tool_name -> module mapping."""
 
     def test_extracts_module_from_tool_name(self, short_sock_path: str) -> None:
         """'obsidian_search' maps to module 'obsidian'."""
