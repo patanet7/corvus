@@ -46,7 +46,7 @@ def _build_tool_registry(module_configs: dict[str, dict]) -> dict[str, dict[str,
     Returns a new dict (not a module-global) so each ToolServer instance
     gets its own isolated registry.
     """
-    from corvus.cli.mcp_bridge import _MODULE_REGISTRY, _populate_module_registry
+    from corvus.cli.tool_registry import _MODULE_REGISTRY, _populate_module_registry
 
     _populate_module_registry()
 
