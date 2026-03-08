@@ -94,9 +94,16 @@ class DispatchControlRegistry:
 class BreakGlassSessionRegistry:
     """Per-user/session break-glass activation built on BreakGlassManager."""
 
-    def __init__(self, manager: BreakGlassManager, *, default_ttl_minutes: int = 30) -> None:
+    def __init__(
+        self,
+        manager: BreakGlassManager,
+        *,
+        default_ttl_minutes: int = 30,
+        max_ttl_minutes: int = 240,
+    ) -> None:
         self._manager = manager
         self._default_ttl_minutes = max(1, default_ttl_minutes)
+        self._max_ttl_minutes = max(1, max_ttl_minutes)
         self._lock = RLock()
         self._active_until: dict[tuple[str, str], datetime] = {}
 
@@ -113,7 +120,8 @@ class BreakGlassSessionRegistry:
             return False, None
 
         minutes = ttl_minutes if ttl_minutes is not None else self._default_ttl_minutes
-        expires_at = datetime.now(UTC) + timedelta(minutes=max(1, minutes))
+        minutes = min(max(1, minutes), self._max_ttl_minutes)
+        expires_at = datetime.now(UTC) + timedelta(minutes=minutes)
         with self._lock:
             self._active_until[(user, session_id)] = expires_at
         return True, expires_at
