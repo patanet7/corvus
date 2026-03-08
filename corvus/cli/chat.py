@@ -34,27 +34,17 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         prog="corvus chat",
         description="Launch Claude Code CLI with Corvus agent configuration",
     )
-    parser.add_argument(
-        "--agent", type=str, default=None, help="Agent name to chat with"
-    )
+    parser.add_argument("--agent", type=str, default=None, help="Agent name to chat with")
     parser.add_argument(
         "--model",
         type=str,
         default=None,
         help="Override model (e.g. ollama/qwen3:8b)",
     )
-    parser.add_argument(
-        "--resume", type=str, default=None, help="Resume session by ID"
-    )
-    parser.add_argument(
-        "--budget", type=float, default=None, help="Spend cap in USD"
-    )
-    parser.add_argument(
-        "--max-turns", type=int, default=None, help="Max conversation turns"
-    )
-    parser.add_argument(
-        "--permission", type=str, default=None, help="Permission mode"
-    )
+    parser.add_argument("--resume", type=str, default=None, help="Resume session by ID")
+    parser.add_argument("--budget", type=float, default=None, help="Spend cap in USD")
+    parser.add_argument("--max-turns", type=int, default=None, help="Max conversation turns")
+    parser.add_argument("--permission", type=str, default=None, help="Permission mode")
     parser.add_argument(
         "--list-agents",
         action="store_true",
@@ -114,10 +104,7 @@ def _pick_agent_interactive(runtime: object) -> str:
             sys.exit(0)
         if choice in {a.name for a in agents}:
             return choice
-        print(
-            f"  Unknown agent '{choice}'. "
-            f"Try one of: {', '.join(a.name for a in agents)}"
-        )
+        print(f"  Unknown agent '{choice}'. Try one of: {', '.join(a.name for a in agents)}")
 
 
 def _handle_list_agents(runtime: object) -> None:
@@ -207,11 +194,65 @@ def _prepare_isolated_env(
     return env
 
 
+def _build_agent_mcp_config(
+    agent_name: str,
+    runtime: object,
+    isolated_home: Path,
+) -> Path | None:
+    """Generate MCP config for the agent's allowed tools.
+
+    Reads the agent's tool modules from its spec, resolves required env vars
+    from the capabilities registry, and merges any external MCP servers
+    declared in the agent YAML.
+
+    Returns the config file path, or None if the agent is not found or
+    generation fails.
+    """
+    from corvus.cli.mcp_config import build_mcp_config
+
+    spec = runtime.agents_hub.get_agent(agent_name)  # type: ignore[attr-defined]
+    if spec is None:
+        return None
+
+    # Determine which modules this agent requests
+    module_configs: dict[str, dict] = {}
+    requires_env_by_module: dict[str, list[str]] = {}
+    if hasattr(spec.tools, "modules") and spec.tools.modules:
+        module_configs = dict(spec.tools.modules)
+
+    # Build requires_env mapping from the capabilities registry
+    caps = runtime.capabilities_registry  # type: ignore[attr-defined]
+    for module_name in module_configs:
+        entry = caps.get_module(module_name)
+        if entry is not None:
+            requires_env_by_module[module_name] = list(entry.requires_env)
+
+    # External MCP servers from agent spec
+    external_servers = getattr(spec.tools, "mcp_servers", []) or []
+
+    # Memory domain
+    memory_domain = spec.memory.own_domain if spec.memory else "shared"
+
+    try:
+        return build_mcp_config(
+            agent_name=agent_name,
+            module_configs=module_configs,
+            requires_env_by_module=requires_env_by_module,
+            external_mcp_servers=external_servers,
+            output_dir=isolated_home,
+            memory_domain=memory_domain,
+        )
+    except Exception as exc:
+        logger.warning("MCP config generation failed: %s — tools unavailable in CLI", exc)
+        return None
+
+
 def _build_claude_cmd(
     claude_bin: str,
     runtime: object,
     agent_name: str,
     args: argparse.Namespace,
+    mcp_config_path: Path | None = None,
 ) -> list[str]:
     """Build the full claude CLI command from agent configuration."""
     from corvus.gateway.options import resolve_backend_and_model
@@ -270,6 +311,10 @@ def _build_claude_cmd(
     if args.print_mode:
         cmd.append("--print")
 
+    # MCP config (domain tools + external servers)
+    if mcp_config_path is not None:
+        cmd.extend(["--mcp-config", str(mcp_config_path)])
+
     return cmd
 
 
@@ -279,7 +324,9 @@ def _start_litellm(runtime: object) -> None:
 
     try:
         asyncio.run(
-            runtime.litellm_manager.start(Path("config/models.yaml"))  # type: ignore[attr-defined]
+            runtime.litellm_manager.start(  # type: ignore[attr-defined]
+                Path(__file__).resolve().parent.parent.parent / "config" / "models.yaml"
+            )
         )
         runtime.model_router.discover_models()  # type: ignore[attr-defined]
         logger.info(
@@ -330,7 +377,10 @@ def main() -> None:
     # Build isolated environment (prevents global plugin/config leakage)
     env = _prepare_isolated_env(agent_name, runtime)
 
-    cmd = _build_claude_cmd(claude_bin, runtime, agent_name, args)
+    # Generate per-agent MCP config (domain tools + memory + external servers)
+    mcp_config_path = _build_agent_mcp_config(agent_name, runtime, Path(env["HOME"]))
+
+    cmd = _build_claude_cmd(claude_bin, runtime, agent_name, args, mcp_config_path=mcp_config_path)
 
     if args.verbose:
         # Show command with truncated system prompt for readability
@@ -341,9 +391,7 @@ def main() -> None:
                 skip_next = False
                 continue
             if arg == "--system-prompt" and i + 1 < len(cmd):
-                display.append(
-                    f"--system-prompt '<{agent_name} prompt: {len(cmd[i + 1])} chars>'"
-                )
+                display.append(f"--system-prompt '<{agent_name} prompt: {len(cmd[i + 1])} chars>'")
                 skip_next = True
             else:
                 display.append(arg)
