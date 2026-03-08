@@ -274,24 +274,31 @@ def _clean_tool_modules():
     orig_ha = (ha._ha_url, ha._ha_token)
     orig_pl = (paperless._paperless_url, paperless._paperless_token)
     orig_ff = (firefly._firefly_url, firefly._firefly_token)
-    orig_ob = (obsidian._base_url, obsidian._api_key)
+    orig_ob = obsidian._client
     yield
-    ha._ha_url, ha._ha_token = orig_ha
     ha._ha_url, ha._ha_token = orig_ha
     paperless._paperless_url, paperless._paperless_token = orig_pl
     firefly._firefly_url, firefly._firefly_token = orig_ff
-    obsidian._base_url, obsidian._api_key = orig_ob
+    obsidian._client = orig_ob
 
 
 @pytest.fixture()
 def _clean_anthropic_env():
-    """Save and restore ANTHROPIC_API_KEY env var."""
-    orig = os.environ.get("ANTHROPIC_API_KEY")
+    """Save and restore credential env vars set by inject()."""
+    env_keys = [
+        "ANTHROPIC_API_KEY",
+        "HA_URL", "HA_TOKEN",
+        "PAPERLESS_URL", "PAPERLESS_API_TOKEN",
+        "FIREFLY_URL", "FIREFLY_API_TOKEN",
+        "OBSIDIAN_URL", "OBSIDIAN_API_KEY",
+    ]
+    originals = {k: os.environ.get(k) for k in env_keys}
     yield
-    if orig is not None:
-        os.environ["ANTHROPIC_API_KEY"] = orig
-    else:
-        os.environ.pop("ANTHROPIC_API_KEY", None)
+    for k, v in originals.items():
+        if v is not None:
+            os.environ[k] = v
+        else:
+            os.environ.pop(k, None)
 
 
 @pytest.fixture()
@@ -332,30 +339,23 @@ class TestFullStartupChain:
             assert secret not in result, f"Secret leaked through sanitize: {secret[:10]}..."
             assert _REDACTED in result
 
-    def test_inject_configures_ha_module(self, encrypted_store):
-        """inject() sets HA module globals from store."""
-        from corvus.tools.ha import _get_config
-
+    def test_inject_sets_ha_env_vars(self, encrypted_store):
+        """inject() sets HA env vars from store."""
         encrypted_store.inject()
-        url, token = _get_config()
-        assert url == "http://homeassistant.local:8123"
-        assert token == HA_TOKEN
+        assert os.environ.get("HA_URL") == "http://homeassistant.local:8123"
+        assert os.environ.get("HA_TOKEN") == HA_TOKEN
 
-    def test_inject_configures_paperless_module(self, encrypted_store):
-        """inject() sets Paperless module globals from store."""
-        from corvus.tools import paperless
-
+    def test_inject_sets_paperless_env_vars(self, encrypted_store):
+        """inject() sets Paperless env vars from store."""
         encrypted_store.inject()
-        assert paperless._paperless_url == "http://localhost:8010"
-        assert paperless._paperless_token == PAPERLESS_TOKEN
+        assert os.environ.get("PAPERLESS_URL") == "http://localhost:8010"
+        assert os.environ.get("PAPERLESS_API_TOKEN") == PAPERLESS_TOKEN
 
-    def test_inject_configures_firefly_module(self, encrypted_store):
-        """inject() sets Firefly module globals from store."""
-        from corvus.tools import firefly
-
+    def test_inject_sets_firefly_env_vars(self, encrypted_store):
+        """inject() sets Firefly env vars from store."""
         encrypted_store.inject()
-        assert firefly._firefly_url == "http://localhost:8081"
-        assert firefly._firefly_token == FIREFLY_TOKEN
+        assert os.environ.get("FIREFLY_URL") == "http://localhost:8081"
+        assert os.environ.get("FIREFLY_API_TOKEN") == FIREFLY_TOKEN
 
     def test_inject_sets_anthropic_env_var(self, encrypted_store):
         """inject() exports ANTHROPIC_API_KEY to env."""

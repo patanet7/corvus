@@ -14,9 +14,22 @@ class TestDefaultAgentSpecs:
     @pytest.fixture(scope="class")
     def specs(self) -> dict[str, AgentSpec]:
         result = {}
+        # Flat layout: config/agents/*.yaml
         for yaml_file in sorted(CONFIG_DIR.glob("*.yaml")):
             spec = AgentSpec.from_yaml(yaml_file)
             result[spec.name] = spec
+        # Directory layout: config/agents/*/agent.yaml (with prompt.md, soul.md convention)
+        for subdir in sorted(CONFIG_DIR.iterdir()):
+            agent_yaml = subdir / "agent.yaml"
+            if subdir.is_dir() and agent_yaml.exists():
+                spec = AgentSpec.from_yaml(agent_yaml)
+                prompt_path = subdir / "prompt.md"
+                soul_path = subdir / "soul.md"
+                if prompt_path.exists() and not spec.prompt_file:
+                    spec.prompt_file = str(prompt_path.relative_to(CONFIG_DIR.parent.parent))
+                if soul_path.exists() and not spec.soul_file:
+                    spec.soul_file = str(soul_path.relative_to(CONFIG_DIR.parent.parent))
+                result[spec.name] = spec
         return result
 
     def test_all_expected_agents_exist(self, specs):
