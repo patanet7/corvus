@@ -56,6 +56,7 @@ class AgentToolConfig:
     builtin: list[str] = field(default_factory=list)
     modules: dict[str, dict] = field(default_factory=dict)
     confirm_gated: list[str] = field(default_factory=list)
+    mcp_servers: list[dict] = field(default_factory=list)
 
 
 @dataclass
