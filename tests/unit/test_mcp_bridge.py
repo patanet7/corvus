@@ -11,11 +11,16 @@ class TestParseArgs:
         assert args.modules_json == "{}"
 
     def test_all_args(self) -> None:
-        args = parse_args([
-            "--agent", "finance",
-            "--modules-json", '{"firefly": {}}',
-            "--memory-domain", "finance",
-        ])
+        args = parse_args(
+            [
+                "--agent",
+                "finance",
+                "--modules-json",
+                '{"firefly": {}}',
+                "--memory-domain",
+                "finance",
+            ]
+        )
         assert args.agent == "finance"
         assert args.memory_domain == "finance"
 
@@ -31,6 +36,7 @@ class TestRegisterModuleTools:
             def decorator(fn):
                 registered.append(name)
                 return fn
+
             return decorator
 
         return registrar, registered

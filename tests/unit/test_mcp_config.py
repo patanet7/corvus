@@ -1,10 +1,7 @@
 """Tests for MCP config generation for CLI agents."""
 
 import json
-import os
 from pathlib import Path
-
-import pytest
 
 from corvus.cli.mcp_config import build_mcp_config, resolve_bridge_env
 
