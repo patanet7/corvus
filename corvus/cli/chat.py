@@ -220,8 +220,8 @@ def _build_claude_cmd(
 ) -> list[str]:
     """Build the full claude CLI command from agent configuration.
 
-    Uses --append-system-prompt to add Corvus identity on top of Claude
-    Code's built-in defaults. Domain instructions, siblings, and memory
+    Uses --system-prompt to replace Claude Code's defaults with Corvus
+    identity and personality. Domain instructions, siblings, and memory
     context are delivered via CLAUDE.md in the workspace. Tools are
     delivered via skills with scripts that talk to the Unix socket server.
     """
@@ -237,7 +237,7 @@ def _build_claude_cmd(
 
     # System prompt — minimal (soul + identity + agent soul only).
     # Appended to Claude Code's built-in defaults rather than replacing them.
-    cmd.extend(["--append-system-prompt", system_prompt])
+    cmd.extend(["--system-prompt", system_prompt])
 
     # Model — resolved through model router (LiteLLM proxy handles routing)
     backend, model = resolve_backend_and_model(runtime, agent_name, args.model)  # type: ignore[arg-type]
@@ -450,8 +450,8 @@ def main() -> None:
             if skip_next:
                 skip_next = False
                 continue
-            if arg == "--append-system-prompt" and i + 1 < len(cmd):
-                display.append(f"--append-system-prompt '<{agent_name} prompt: {len(cmd[i + 1])} chars>'")
+            if arg == "--system-prompt" and i + 1 < len(cmd):
+                display.append(f"--system-prompt '<{agent_name} prompt: {len(cmd[i + 1])} chars>'")
                 skip_next = True
             else:
                 display.append(arg)

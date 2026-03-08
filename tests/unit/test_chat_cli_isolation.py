@@ -73,18 +73,18 @@ def test_no_strict_mcp_config():
     assert "--strict-mcp-config" not in cmd
 
 
-def test_uses_append_system_prompt():
-    """CLI must use --append-system-prompt to preserve Claude Code defaults."""
+def test_uses_system_prompt():
+    """CLI must use --system-prompt to replace CC defaults with Corvus identity."""
     runtime = _FakeRuntime()
     prompt = "You are the homelab agent."
     cmd = _build_claude_cmd(
         "/usr/bin/claude", runtime, "homelab", _make_args(),
         system_prompt=prompt,
     )
-    assert "--append-system-prompt" in cmd
-    idx = cmd.index("--append-system-prompt")
+    assert "--system-prompt" in cmd
+    idx = cmd.index("--system-prompt")
     assert cmd[idx + 1] == prompt
-    assert "--system-prompt" not in cmd
+    assert "--append-system-prompt" not in cmd
 
 
 def test_no_mcp_config():
