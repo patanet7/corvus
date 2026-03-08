@@ -183,9 +183,12 @@ def _prepare_isolated_env(
         shared_skills=shared_skills,
     )
 
-    # Override env to isolate claude from user-global state
+    # Override env to isolate claude workspace from user-global state.
+    # NOTE: We intentionally do NOT override CLAUDE_CONFIG_DIR — Claude Code
+    # reads its OAuth credentials and account info from ~/.claude/ and the
+    # macOS Keychain.  The --strict-mcp-config and --setting-sources flags
+    # already prevent global plugins/MCP configs from leaking in.
     env["HOME"] = str(runtime_home)
-    env["CLAUDE_CONFIG_DIR"] = str(claude_config)
     env["XDG_CONFIG_HOME"] = str(xdg_config)
     env["XDG_CACHE_HOME"] = str(xdg_cache)
     env["XDG_STATE_HOME"] = str(xdg_state)
