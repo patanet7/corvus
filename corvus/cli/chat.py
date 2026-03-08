@@ -10,6 +10,11 @@ isolated environment with the agent's system prompt, model, and permissions.
 The model router (LiteLLM proxy) runs on localhost:4000 and the CLI
 inherits ANTHROPIC_BASE_URL so all requests route through it.
 
+A Unix socket tool server runs alongside the agent subprocess, providing
+tool access via JWT-authenticated requests. The agent workspace contains
+CLAUDE.md (domain instructions, siblings, memory seeds) and skill scripts
+that talk to the tool server. Credentials never leave the parent process.
+
 Environment isolation prevents the claude binary from reading the user's
 global ~/.claude/ (plugins, settings, MCP configs). Each agent gets its
 own scoped runtime home under .data/claude-home/.
@@ -127,15 +132,32 @@ def _handle_list_models(runtime: object) -> None:
     print()
 
 
+# Sensitive env vars stripped from agent subprocess (credentials stay in tool server).
+_SENSITIVE_VARS = [
+    "HA_URL", "HA_TOKEN",
+    "OBSIDIAN_URL", "OBSIDIAN_API_KEY",
+    "PAPERLESS_URL", "PAPERLESS_API_TOKEN",
+    "FIREFLY_URL", "FIREFLY_API_TOKEN",
+    "GMAIL_TOKEN", "GMAIL_CREDENTIALS",
+    "YAHOO_APP_PASSWORD",
+]
+
+
 def _prepare_isolated_env(
     agent_name: str,
     runtime: object,
+    tool_socket: str | None = None,
+    tool_token: str | None = None,
 ) -> dict[str, str]:
     """Build an isolated environment for the claude subprocess.
 
     Prevents the claude binary from reading the user's global ~/.claude/
     (plugins, settings, MCP configs). Each agent gets its own scoped
     runtime home under .data/claude-home/.
+
+    Tool server env vars (CORVUS_TOOL_SOCKET, CORVUS_TOOL_TOKEN) are
+    injected so skill scripts can reach the parent-process tool server.
+    Service credentials are stripped — they stay in the tool server process.
     """
     from corvus.config import CLAUDE_CONFIG_TEMPLATE, CLAUDE_RUNTIME_HOME
     from corvus.gateway.options import resolve_claude_runtime_home
@@ -168,25 +190,7 @@ def _prepare_isolated_env(
         else:
             config_json.write_text("{}\n", encoding="utf-8")
 
-    # Copy agent-specific skills into the isolated home
-    from corvus.gateway.workspace_runtime import copy_agent_skills
-
-    config_dir = Path(__file__).resolve().parent.parent.parent
-    spec = runtime.agents_hub.get_agent(agent_name)  # type: ignore[attr-defined]
-    shared_skills = None
-    if spec and isinstance(spec.metadata, dict):
-        shared_skills = spec.metadata.get("shared_skills")
-    copy_agent_skills(
-        agent_name=agent_name,
-        config_dir=config_dir,
-        workspace_dir=runtime_home,
-        shared_skills=shared_skills,
-    )
-
     # Override env to isolate claude from user-global state.
-    # CLAUDE_CONFIG_DIR must be isolated to prevent global plugins/MCP/settings
-    # from leaking in. Auth works via ANTHROPIC_API_KEY (injected by
-    # init_credentials from SOPS store) routed through the LiteLLM proxy.
     env["HOME"] = str(runtime_home)
     env["CLAUDE_CONFIG_DIR"] = str(claude_config)
     env["XDG_CONFIG_HOME"] = str(xdg_config)
@@ -194,60 +198,17 @@ def _prepare_isolated_env(
     env["XDG_STATE_HOME"] = str(xdg_state)
     env["XDG_DATA_HOME"] = str(xdg_data)
 
+    # Tool server env vars for skill scripts
+    if tool_socket:
+        env["CORVUS_TOOL_SOCKET"] = tool_socket
+    if tool_token:
+        env["CORVUS_TOOL_TOKEN"] = tool_token
+
+    # Strip service credentials — they stay in the tool server process
+    for var in _SENSITIVE_VARS:
+        env.pop(var, None)
+
     return env
-
-
-def _build_agent_mcp_config(
-    agent_name: str,
-    runtime: object,
-    isolated_home: Path,
-) -> Path | None:
-    """Generate MCP config for the agent's allowed tools.
-
-    Reads the agent's tool modules from its spec, resolves required env vars
-    from the capabilities registry, and merges any external MCP servers
-    declared in the agent YAML.
-
-    Returns the config file path, or None if the agent is not found or
-    generation fails.
-    """
-    from corvus.cli.mcp_config import build_mcp_config
-
-    spec = runtime.agents_hub.get_agent(agent_name)  # type: ignore[attr-defined]
-    if spec is None:
-        return None
-
-    # Determine which modules this agent requests
-    module_configs: dict[str, dict] = {}
-    requires_env_by_module: dict[str, list[str]] = {}
-    if hasattr(spec.tools, "modules") and spec.tools.modules:
-        module_configs = dict(spec.tools.modules)
-
-    # Build requires_env mapping from the capabilities registry
-    caps = runtime.capabilities_registry  # type: ignore[attr-defined]
-    for module_name in module_configs:
-        entry = caps.get_module(module_name)
-        if entry is not None:
-            requires_env_by_module[module_name] = list(entry.requires_env)
-
-    # External MCP servers from agent spec
-    external_servers = getattr(spec.tools, "mcp_servers", []) or []
-
-    # Memory domain
-    memory_domain = spec.memory.own_domain if spec.memory else "shared"
-
-    try:
-        return build_mcp_config(
-            agent_name=agent_name,
-            module_configs=module_configs,
-            requires_env_by_module=requires_env_by_module,
-            external_mcp_servers=external_servers,
-            output_dir=isolated_home,
-            memory_domain=memory_domain,
-        )
-    except Exception as exc:
-        logger.warning("MCP config generation failed: %s — tools unavailable in CLI", exc)
-        return None
 
 
 def _build_claude_cmd(
@@ -255,25 +216,28 @@ def _build_claude_cmd(
     runtime: object,
     agent_name: str,
     args: argparse.Namespace,
-    mcp_config_path: Path | None = None,
+    system_prompt: str,
 ) -> list[str]:
-    """Build the full claude CLI command from agent configuration."""
+    """Build the full claude CLI command from agent configuration.
+
+    Uses --append-system-prompt to add Corvus identity on top of Claude
+    Code's built-in defaults. Domain instructions, siblings, and memory
+    context are delivered via CLAUDE.md in the workspace. Tools are
+    delivered via skills with scripts that talk to the Unix socket server.
+    """
     from corvus.gateway.options import resolve_backend_and_model
     from corvus.permissions import normalize_permission_mode
 
     cmd: list[str] = [claude_bin]
 
     # --- Isolation flags ---
-    # Only use MCP servers we explicitly pass, ignore global configs
-    cmd.append("--strict-mcp-config")
-    # Only load project-level settings (blocks user-level plugins/skills)
-    # Agent-specific skills are loaded from the isolated HOME/.claude/skills/
+    # Only load project-level settings (blocks user-level plugins/skills).
+    # Agent-specific skills are loaded from the workspace .claude/skills/
     cmd.extend(["--setting-sources", "project"])
 
-    # System prompt — full 6-layer composition (soul, agent soul, identity,
-    # prompt, siblings, memory context)
-    system_prompt = runtime.agents_hub.build_system_prompt(agent_name)  # type: ignore[attr-defined]
-    cmd.extend(["--system-prompt", system_prompt])
+    # System prompt — minimal (soul + identity + agent soul only).
+    # Appended to Claude Code's built-in defaults rather than replacing them.
+    cmd.extend(["--append-system-prompt", system_prompt])
 
     # Model — resolved through model router (LiteLLM proxy handles routing)
     backend, model = resolve_backend_and_model(runtime, agent_name, args.model)  # type: ignore[arg-type]
@@ -294,9 +258,12 @@ def _build_claude_cmd(
         permission_mode = "default"
     cmd.extend(["--permission-mode", permission_mode])
 
-    # Allowed tools from agent spec (auto-approve these)
+    # Allowed tools — builtin from spec + Bash(python *) for skill scripts
+    allowed: list[str] = []
     if spec and spec.tools.builtin:
-        cmd.extend(["--allowedTools", *spec.tools.builtin])
+        allowed.extend(spec.tools.builtin)
+    allowed.append("Bash(python *)")
+    cmd.extend(["--allowedTools", *allowed])
 
     # Budget
     if args.budget is not None:
@@ -313,10 +280,6 @@ def _build_claude_cmd(
     # Print mode (non-interactive)
     if args.print_mode:
         cmd.append("--print")
-
-    # MCP config (domain tools + external servers)
-    if mcp_config_path is not None:
-        cmd.extend(["--mcp-config", str(mcp_config_path)])
 
     return cmd
 
@@ -356,7 +319,15 @@ def _stop_litellm(runtime: object) -> None:
 
 def main() -> None:
     """Entry point for corvus chat."""
+    import asyncio
+
+    from corvus.cli.compose_claude_md import compose_claude_md
+    from corvus.cli.compose_system_prompt import compose_system_prompt
+    from corvus.cli.tool_server import ToolServer
+    from corvus.cli.tool_token import create_token
+    from corvus.config import WORKSPACE_DIR
     from corvus.gateway.runtime import build_runtime, ensure_dirs
+    from corvus.gateway.workspace_runtime import copy_agent_skills
 
     logging.basicConfig(level=logging.WARNING, format="%(message)s")
     args = parse_args()
@@ -374,39 +345,129 @@ def main() -> None:
     agent_name = args.agent or _pick_agent_interactive(runtime)
     claude_bin = _find_claude_binary()
 
+    agent_workspace = WORKSPACE_DIR / "agents" / agent_name
+    agent_workspace.mkdir(parents=True, exist_ok=True)
+
     # Start LiteLLM proxy for model routing
     _start_litellm(runtime)
 
-    # Build isolated environment (prevents global plugin/config leakage)
-    env = _prepare_isolated_env(agent_name, runtime)
+    # --- Tool server setup ---
+    spec = runtime.agents_hub.get_agent(agent_name)  # type: ignore[attr-defined]
+    module_configs: dict[str, dict] = {}
+    if spec and hasattr(spec.tools, "modules") and spec.tools.modules:
+        module_configs = dict(spec.tools.modules)
 
-    # Generate per-agent MCP config (domain tools + memory + external servers)
-    mcp_config_path = _build_agent_mcp_config(agent_name, runtime, Path(env["HOME"]))
+    memory_domain = spec.memory.own_domain if spec and spec.memory else "shared"
 
-    cmd = _build_claude_cmd(claude_bin, runtime, agent_name, args, mcp_config_path=mcp_config_path)
+    secret = os.urandom(32)
+    socket_path = str(agent_workspace / ".corvus.sock")
+    token = create_token(
+        secret=secret,
+        agent=agent_name,
+        modules=list(module_configs.keys()) + ["memory"],
+        ttl_seconds=86400,  # 24h — session-scoped, server stops on exit
+    )
+
+    tool_server = ToolServer(
+        secret=secret,
+        socket_path=socket_path,
+        module_configs=module_configs,
+        agent_name=agent_name,
+        memory_domain=memory_domain,
+    )
+    loop = asyncio.new_event_loop()
+    loop.run_until_complete(tool_server.start())
+
+    # --- Compose system prompt (minimal: soul + identity + agent soul) ---
+    config_dir = Path(__file__).resolve().parent.parent.parent
+    agent_soul_content = None
+    if spec and getattr(spec, "soul_file", None):
+        soul_path = config_dir / spec.soul_file
+        if soul_path.exists():
+            agent_soul_content = soul_path.read_text()
+
+    system_prompt = compose_system_prompt(
+        config_dir=config_dir,
+        agent_name=agent_name,
+        agent_soul_content=agent_soul_content,
+    )
+
+    # --- Write CLAUDE.md to workspace ---
+    enabled = runtime.agent_registry.list_enabled()  # type: ignore[attr-defined]
+    siblings = [
+        (a.name, a.description.strip())
+        for a in enabled
+        if a.name != agent_name and a.name != "huginn"
+    ]
+
+    memory_lines: list[str] = []
+    try:
+        records = runtime.agents_hub.memory_hub.seed_context(agent_name, limit=15)  # type: ignore[attr-defined]
+        for r in records:
+            tag_str = f" [{', '.join(r.tags)}]" if r.tags else ""
+            prefix = "[evergreen] " if r.importance >= 0.9 else ""
+            memory_lines.append(f"- {prefix}({r.domain}) {r.content[:300]}{tag_str}")
+    except Exception as exc:
+        logger.warning("Memory seed failed: %s", exc)
+
+    claude_md_content = compose_claude_md(
+        spec=spec,
+        config_dir=config_dir,
+        siblings=siblings,
+        memory_lines=memory_lines,
+        memory_domain=memory_domain,
+    )
+    (agent_workspace / "CLAUDE.md").write_text(claude_md_content, encoding="utf-8")
+
+    # --- Build isolated environment ---
+    env = _prepare_isolated_env(
+        agent_name,
+        runtime,
+        tool_socket=socket_path,
+        tool_token=token,
+    )
+
+    # --- Copy skills (tool modules + agent + shared) ---
+    copy_agent_skills(
+        agent_name=agent_name,
+        config_dir=config_dir,
+        workspace_dir=agent_workspace,
+        shared_skills=(
+            spec.metadata.get("shared_skills")
+            if spec and isinstance(spec.metadata, dict)
+            else None
+        ),
+        tool_modules=list(module_configs.keys()),
+    )
+
+    # --- Build command ---
+    cmd = _build_claude_cmd(claude_bin, runtime, agent_name, args, system_prompt=system_prompt)
 
     if args.verbose:
-        # Show command with truncated system prompt for readability
         display = []
         skip_next = False
         for i, arg in enumerate(cmd):
             if skip_next:
                 skip_next = False
                 continue
-            if arg == "--system-prompt" and i + 1 < len(cmd):
-                display.append(f"--system-prompt '<{agent_name} prompt: {len(cmd[i + 1])} chars>'")
+            if arg == "--append-system-prompt" and i + 1 < len(cmd):
+                display.append(f"--append-system-prompt '<{agent_name} prompt: {len(cmd[i + 1])} chars>'")
                 skip_next = True
             else:
                 display.append(arg)
         print(f"\n  {' '.join(display)}\n")
         print(f"  Isolated HOME: {env['HOME']}")
+        print(f"  Tool socket: {socket_path}")
 
-    print(f"\n  Launching Claude Code as @{agent_name}...\n")
+    print(f"\n  Launching Claude Code as @{agent_name}...")
+    print(f"  Workspace: {agent_workspace}\n")
 
     try:
-        result = subprocess.run(cmd, env=env)
+        result = subprocess.run(cmd, env=env, cwd=agent_workspace)
         sys.exit(result.returncode)
     finally:
+        loop.run_until_complete(tool_server.stop())
+        loop.close()
         _stop_litellm(runtime)
 
 
