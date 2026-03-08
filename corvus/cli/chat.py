@@ -23,6 +23,7 @@ own scoped runtime home under .data/claude-home/.
 from __future__ import annotations
 
 import argparse
+import json
 import logging
 import os
 import shutil
@@ -418,6 +419,14 @@ def main() -> None:
         memory_domain=memory_domain,
     )
     (agent_workspace / "CLAUDE.md").write_text(claude_md_content, encoding="utf-8")
+
+    # --- Write project settings (disable marketplace, lock down plugins) ---
+    settings_dir = agent_workspace / ".claude"
+    settings_dir.mkdir(parents=True, exist_ok=True)
+    (settings_dir / "settings.json").write_text(
+        json.dumps({"enabledPlugins": {}, "strictKnownMarketplaces": []}, indent=2) + "\n",
+        encoding="utf-8",
+    )
 
     # --- Build isolated environment ---
     env = _prepare_isolated_env(
