@@ -12,8 +12,6 @@ import os
 import socket
 from pathlib import Path
 
-import pytest
-
 from corvus.cli.tool_server import ToolServer
 from corvus.cli.tool_token import create_token
 

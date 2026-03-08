@@ -172,7 +172,7 @@ class ToolServer:
                 await writer.drain()
             except Exception:
                 pass
-        except asyncio.TimeoutError:
+        except TimeoutError:
             response = {"ok": False, "error": "timeout"}
             try:
                 writer.write(json.dumps(response).encode())

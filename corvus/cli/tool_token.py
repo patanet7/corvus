@@ -17,7 +17,6 @@ import hmac
 import json
 import time
 
-
 _MIN_SECRET_LEN = 32
 
 _HEADER_B64 = base64.urlsafe_b64encode(

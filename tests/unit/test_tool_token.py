@@ -1,6 +1,5 @@
 """Tests for agent-scoped JWT tokens."""
 
-import base64
 import json
 import time
 

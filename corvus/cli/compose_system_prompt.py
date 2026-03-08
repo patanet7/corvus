@@ -12,7 +12,6 @@ from __future__ import annotations
 
 from pathlib import Path
 
-
 _FALLBACK_SOUL = (
     "You are an agent in **Corvus**, a local-first, self-hosted "
     "multi-agent system.\n\n"
