@@ -123,18 +123,19 @@ def copy_agent_skills(
     config_dir: Path,
     workspace_dir: Path,
     shared_skills: list[str] | None = None,
+    tool_modules: list[str] | None = None,
 ) -> None:
-    """Copy agent-specific and shared skills into workspace .claude/skills/."""
+    """Copy agent-specific, shared, and tool skills into workspace .claude/skills/."""
     skills_dest = workspace_dir / ".claude" / "skills"
 
-    # Agent-specific skills
+    # Agent-specific skills (flat .md files)
     agent_skills_dir = config_dir / "config" / "agents" / agent_name / "skills"
     if agent_skills_dir.is_dir():
         skills_dest.mkdir(parents=True, exist_ok=True)
         for skill_file in agent_skills_dir.glob("*.md"):
             shutil.copy2(skill_file, skills_dest / skill_file.name)
 
-    # Shared skills
+    # Shared skills (flat .md files)
     if shared_skills:
         shared_dir = config_dir / "config" / "skills" / "shared"
         if shared_dir.is_dir():
@@ -145,3 +146,26 @@ def copy_agent_skills(
                     shutil.copy2(src, skills_dest / src.name)
                 else:
                     logger.warning("Shared skill '%s' not found at %s", skill_name, src)
+
+    # Tool skills (directory-based, with scripts/)
+    tools_src = config_dir / "config" / "skills" / "tools"
+    if tools_src.is_dir():
+        # Always include memory
+        modules_to_copy = set(tool_modules or [])
+        modules_to_copy.add("memory")
+
+        for module_name in modules_to_copy:
+            src_dir = tools_src / module_name
+            if src_dir.is_dir():
+                dest_dir = skills_dest / module_name
+                if dest_dir.exists():
+                    shutil.rmtree(dest_dir)
+                shutil.copytree(src_dir, dest_dir)
+
+        # Copy shared client library
+        lib_src = tools_src / "_lib"
+        if lib_src.is_dir():
+            lib_dest = skills_dest / "_lib"
+            if lib_dest.exists():
+                shutil.rmtree(lib_dest)
+            shutil.copytree(lib_src, lib_dest)
