@@ -335,8 +335,11 @@ def _build_can_use_tool(
                     message=f"User denied tool '{tool_name}'.",
                     interrupt=False,
                 )
-            # No confirm queue — fall through to allow (break-glass / no WS)
-            return PermissionResultAllow()
+            # No confirm queue — deny by default. Break-glass handled earlier.
+            return PermissionResultDeny(
+                message=f"Tool '{tool_name}' requires confirmation but no confirm queue is available.",
+                interrupt=False,
+            )
         if decision.allowed:
             return PermissionResultAllow()
         return PermissionResultDeny(message=decision.reason, interrupt=False)

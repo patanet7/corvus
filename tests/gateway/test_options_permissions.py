@@ -46,7 +46,8 @@ def _build_runtime() -> _Runtime:
     )
 
 
-def test_can_use_tool_emits_ws_permission_decision_for_allow() -> None:
+def test_can_use_tool_confirm_gated_no_queue_denies() -> None:
+    """Confirm-gated tool with no confirm queue must be denied (SEC-003)."""
     runtime = _build_runtime()
     captured: list[dict] = []
 
@@ -62,8 +63,10 @@ def test_can_use_tool_emits_ws_permission_decision_for_allow() -> None:
     assert callback is not None
 
     result = asyncio.run(callback("Bash", {"command": "pwd"}, ToolPermissionContext()))
-    assert isinstance(result, PermissionResultAllow)
-    # Two WS messages: tool_permission_decision + confirm_request (confirm-gated tool)
+    assert isinstance(result, PermissionResultDeny)
+    assert "requires confirmation" in result.message
+    assert "no confirm queue" in result.message
+    # Two WS messages: tool_permission_decision + confirm_request
     assert len(captured) == 2
     assert captured[0]["type"] == "tool_permission_decision"
     assert captured[0]["agent"] == "docs"
