@@ -252,59 +252,80 @@ class TestBuildAgentMcpConfig:
         assert bridge["env"] == {}
 
 
+class _SimpleModelRouter:
+    """Minimal model router satisfying resolve_backend_and_model requirements."""
+
+    def get_model(self, name: str) -> str:
+        return "claude-sonnet-4-20250514"
+
+    def get_backend(self, name: str) -> str:
+        return "claude"
+
+
+class _CmdAgentsHub(_SimpleAgentsHub):
+    """Agents hub that also provides build_system_prompt for _build_claude_cmd."""
+
+    def build_system_prompt(self, name: str) -> str:
+        return f"You are {name}."
+
+
+@dataclass
+class _CmdRuntime:
+    """Runtime with all attributes _build_claude_cmd reads."""
+
+    capabilities_registry: CapabilitiesRegistry = field(default_factory=CapabilitiesRegistry)
+    agents_hub: _CmdAgentsHub = field(default_factory=_CmdAgentsHub)
+    model_router: _SimpleModelRouter = field(default_factory=_SimpleModelRouter)
+
+
 class TestBuildClaudeCmdMcpConfig:
     """Test that _build_claude_cmd handles mcp_config_path correctly.
 
-    These tests verify the --mcp-config flag presence by inspecting the
-    command list. They use subprocess to avoid importing the full runtime
-    dependency chain.
+    Uses a minimal runtime stub to call the real function.
     """
 
-    def test_mcp_config_flag_present_when_path_given(self) -> None:
-        """--mcp-config appears in command when a config path is provided."""
-        import subprocess
-        import sys
-
-        # Run a snippet that constructs a minimal cmd to test the flag logic
-        # This avoids needing a full GatewayRuntime
-        code = """
-import sys
-# Simulate the flag logic from _build_claude_cmd
-mcp_config_path = "/tmp/test-mcp.json"
-cmd = ["claude", "--strict-mcp-config"]
-if mcp_config_path is not None:
-    cmd.extend(["--mcp-config", str(mcp_config_path)])
-assert "--mcp-config" in cmd, f"--mcp-config not in {cmd}"
-assert "/tmp/test-mcp.json" in cmd
-print("PASS")
-"""
-        result = subprocess.run(
-            [sys.executable, "-c", code],
-            capture_output=True,
-            text=True,
-            timeout=10,
+    def _make_runtime(self) -> _CmdRuntime:
+        spec = AgentSpec(
+            name="test",
+            description="Test agent",
+            tools=AgentToolConfig(builtin=["Bash"]),
+            memory=AgentMemoryConfig(own_domain="test"),
         )
-        assert result.returncode == 0, f"Failed: {result.stderr}"
-        assert "PASS" in result.stdout
+        return _CmdRuntime(
+            agents_hub=_CmdAgentsHub({"test": spec}),
+        )
+
+    def test_mcp_config_flag_present_when_path_given(self, tmp_path: Path) -> None:
+        """--mcp-config appears in command when a config path is provided."""
+        from corvus.cli.chat import _build_claude_cmd, parse_args
+
+        runtime = self._make_runtime()
+        args = parse_args(["--agent", "test"])
+        config_path = tmp_path / ".corvus-mcp.json"
+        config_path.write_text("{}")
+
+        cmd = _build_claude_cmd(
+            "/usr/bin/claude",
+            runtime,
+            "test",
+            args,
+            mcp_config_path=config_path,
+        )
+        assert "--mcp-config" in cmd
+        assert str(config_path) in cmd
 
     def test_mcp_config_flag_absent_when_path_is_none(self) -> None:
         """--mcp-config does NOT appear when config path is None."""
-        import subprocess
-        import sys
+        from corvus.cli.chat import _build_claude_cmd, parse_args
 
-        code = """
-mcp_config_path = None
-cmd = ["claude", "--strict-mcp-config"]
-if mcp_config_path is not None:
-    cmd.extend(["--mcp-config", str(mcp_config_path)])
-assert "--mcp-config" not in cmd, f"--mcp-config should not be in {cmd}"
-print("PASS")
-"""
-        result = subprocess.run(
-            [sys.executable, "-c", code],
-            capture_output=True,
-            text=True,
-            timeout=10,
+        runtime = self._make_runtime()
+        args = parse_args(["--agent", "test"])
+
+        cmd = _build_claude_cmd(
+            "/usr/bin/claude",
+            runtime,
+            "test",
+            args,
+            mcp_config_path=None,
         )
-        assert result.returncode == 0, f"Failed: {result.stderr}"
-        assert "PASS" in result.stdout
+        assert "--mcp-config" not in cmd
