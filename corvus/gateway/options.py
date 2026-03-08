@@ -15,7 +15,6 @@ from claude_agent_sdk.types import PermissionResultAllow, PermissionResultDeny, 
 from fastapi import WebSocket
 
 from corvus.config import (
-    BREAK_GLASS_MODE,
     CLAUDE_CONFIG_TEMPLATE,
     CLAUDE_HOME_SCOPE,
     CLAUDE_RUNTIME_HOME,
@@ -154,7 +153,7 @@ def build_hooks(
         runtime.emitter,
         ws_callback=ws_forward if (websocket or ws_callback) else None,
         confirm_gated=confirm_gated,
-        allow_secret_access=allow_secret_access or BREAK_GLASS_MODE,
+        allow_secret_access=allow_secret_access,
     )
     return {
         "PreToolUse": [
@@ -251,7 +250,7 @@ def _resolve_permission_mode(
     allow_secret_access: bool,
 ) -> str:
     """Resolve SDK permission mode from break-glass + per-agent metadata."""
-    if allow_secret_access or BREAK_GLASS_MODE:
+    if allow_secret_access:
         return "bypassPermissions"
     if not agent_name:
         return "default"

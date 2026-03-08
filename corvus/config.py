@@ -38,7 +38,6 @@ PORT = int(os.environ.get("PORT", "18789"))
 # Auth
 ALLOWED_USERS = [u for u in os.environ.get("ALLOWED_USERS", "").split(",") if u]
 MAX_PARALLEL_AGENT_RUNS = max(1, int(os.environ.get("MAX_PARALLEL_AGENT_RUNS", "4")))
-BREAK_GLASS_MODE = os.environ.get("CORVUS_BREAK_GLASS", "").lower() in {"1", "true", "yes", "on"}
 
 # Google multi-account (new pattern)
 # GOOGLE_ACCOUNT_{name}_EMAIL, GOOGLE_ACCOUNT_{name}_CREDENTIALS, GOOGLE_ACCOUNT_{name}_TOKEN
