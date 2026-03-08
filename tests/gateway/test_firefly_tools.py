@@ -329,7 +329,7 @@ _has_firefly = bool(os.environ.get("FIREFLY_URL"))
 _skip_reason = "FIREFLY_URL not set — skipping live Firefly contract tests"
 
 
-@pytest.fixture(autouse=True, scope="module")
+@pytest.fixture(autouse=True)
 def _configure_live():
     """Configure firefly tools from env vars for live tests."""
     url = os.environ.get("FIREFLY_URL", "")
@@ -338,6 +338,7 @@ def _configure_live():
         configure(url, token)
 
 
+@pytest.mark.live
 @pytest.mark.skipif(not _has_firefly, reason=_skip_reason)
 class TestLiveFireflyAccounts:
     """Live contract tests for firefly_accounts."""
@@ -372,6 +373,7 @@ class TestLiveFireflyAccounts:
             assert acct["type"] == "asset"
 
 
+@pytest.mark.live
 @pytest.mark.skipif(not _has_firefly, reason=_skip_reason)
 class TestLiveFireflyTransactions:
     """Live contract tests for firefly_transactions."""

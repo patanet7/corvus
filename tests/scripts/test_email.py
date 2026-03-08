@@ -504,14 +504,14 @@ class TestAgentDefinition:
         """The email agent must have Bash in its builtin tools."""
         import yaml
 
-        config = yaml.safe_load((WORKTREE_ROOT / "config" / "agents" / "email.yaml").read_text())
+        config = yaml.safe_load((WORKTREE_ROOT / "config" / "agents" / "email" / "agent.yaml").read_text())
         assert "Bash" in config["tools"]["builtin"]
 
     def test_email_agent_has_email_tools(self) -> None:
         """The email agent must have the email module enabled."""
         import yaml
 
-        config = yaml.safe_load((WORKTREE_ROOT / "config" / "agents" / "email.yaml").read_text())
+        config = yaml.safe_load((WORKTREE_ROOT / "config" / "agents" / "email" / "agent.yaml").read_text())
         assert "email" in config["tools"]["modules"]
         assert config["tools"]["modules"]["email"]["enabled"] is True
 
@@ -519,7 +519,7 @@ class TestAgentDefinition:
         """The email agent description should mention Yahoo or inbox."""
         import yaml
 
-        config = yaml.safe_load((WORKTREE_ROOT / "config" / "agents" / "email.yaml").read_text())
+        config = yaml.safe_load((WORKTREE_ROOT / "config" / "agents" / "email" / "agent.yaml").read_text())
         desc = config["description"].lower()
         assert "yahoo" in desc or "inbox" in desc
 

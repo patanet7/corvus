@@ -5,7 +5,7 @@ spawn, initialize, session management, prompt dispatch, security-gated callbacks
 and graceful termination. All communication uses JSON-RPC 2.0 over stdio (NDJSON).
 
 Security layers enforced:
-1. Environment stripping (sandbox.build_acp_env)
+1. Environment stripping (sandbox.build_acp_spawn_env / build_acp_child_env)
 2. Process isolation (sandbox.build_sandbox_command)
 3. File gate (file_gate.check_file_access)
 4. Terminal gate (terminal_gate.check_terminal_command)
@@ -26,7 +26,7 @@ from typing import Any
 from corvus.acp.file_gate import check_file_access
 from corvus.acp.permission_map import map_acp_permission
 from corvus.acp.registry import AcpAgentEntry
-from corvus.acp.sandbox import build_acp_env, build_sandbox_command
+from corvus.acp.sandbox import build_acp_spawn_env, build_sandbox_command
 from corvus.acp.terminal_gate import check_terminal_command
 from corvus.sanitize import sanitize
 
@@ -127,7 +127,7 @@ class CorvusACPClient:
         Raises:
             RuntimeError: If the process fails to start.
         """
-        env = build_acp_env(workspace=self._config.workspace)
+        env = build_acp_spawn_env(workspace=self._config.workspace)
         cmd_parts = self._config.agent_entry.command_parts()
         sandboxed_cmd = build_sandbox_command(cmd_parts)
 
@@ -268,11 +268,14 @@ class CorvusACPClient:
 
         return True
 
-    async def handle_fs_read(self, path: str) -> dict[str, Any]:
+    async def handle_fs_read(
+        self, path: str, *, allow_secret_access: bool = False,
+    ) -> dict[str, Any]:
         """Handle an ACP fs/readTextFile callback with file gate enforcement.
 
         Args:
             path: The file path the agent wants to read.
+            allow_secret_access: If True (break-glass), bypass secret pattern checks.
 
         Returns:
             Dict with ``content`` key on success, or ``error`` key on denial.
@@ -283,6 +286,7 @@ class CorvusACPClient:
             operation="read",
             parent_allows_read=self._config.parent_allows_read,
             parent_allows_write=self._config.parent_allows_write,
+            allow_secret_access=allow_secret_access,
         )
 
         if not result.allowed:
@@ -301,13 +305,14 @@ class CorvusACPClient:
             return {"error": f"Read failed: {exc}"}
 
     async def handle_fs_write(
-        self, path: str, content: str
+        self, path: str, content: str, *, allow_secret_access: bool = False,
     ) -> dict[str, Any]:
         """Handle an ACP fs/writeTextFile callback with file gate enforcement.
 
         Args:
             path: The file path the agent wants to write.
             content: The content to write.
+            allow_secret_access: If True (break-glass), bypass secret pattern checks.
 
         Returns:
             Dict with ``success`` key on success, or ``error`` key on denial.
@@ -318,6 +323,7 @@ class CorvusACPClient:
             operation="write",
             parent_allows_read=self._config.parent_allows_read,
             parent_allows_write=self._config.parent_allows_write,
+            allow_secret_access=allow_secret_access,
         )
 
         if not result.allowed:

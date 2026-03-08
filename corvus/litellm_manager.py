@@ -27,6 +27,16 @@ _SDK_MODEL_MAP: dict[str, str] = {
     "opus": "anthropic/claude-opus-4-20250514",
 }
 
+# Claude Code resolves short aliases to full model IDs before sending
+# requests. Register these so LiteLLM can route them.
+_CLAUDE_CODE_MODEL_IDS: dict[str, str] = {
+    "claude-sonnet-4-6": "anthropic/claude-sonnet-4-6",
+    "claude-sonnet-4-20250514": "anthropic/claude-sonnet-4-20250514",
+    "claude-opus-4-6": "anthropic/claude-opus-4-6",
+    "claude-opus-4-20250514": "anthropic/claude-opus-4-20250514",
+    "claude-haiku-4-5-20251001": "anthropic/claude-haiku-4-5-20251001",
+}
+
 _DEFAULT_PORT = 4000
 _DEFAULT_HOST = "127.0.0.1"
 _HEALTH_TIMEOUT = 30.0
@@ -50,7 +60,7 @@ def generate_litellm_config(models_yaml_path: Path) -> dict[str, Any]:
     model_list: list[dict[str, Any]] = []
     seen_models: set[str] = set()
 
-    # 1. SDK-native Claude models
+    # 1a. SDK-native Claude models (short aliases: sonnet, haiku, opus)
     for short_name, litellm_model in _SDK_MODEL_MAP.items():
         if short_name not in seen_models:
             model_list.append({
@@ -61,6 +71,18 @@ def generate_litellm_config(models_yaml_path: Path) -> dict[str, Any]:
                 },
             })
             seen_models.add(short_name)
+
+    # 1b. Full model IDs that Claude Code sends after resolving aliases
+    for model_id, litellm_model in _CLAUDE_CODE_MODEL_IDS.items():
+        if model_id not in seen_models:
+            model_list.append({
+                "model_name": model_id,
+                "litellm_params": {
+                    "model": litellm_model,
+                    "api_key": "os.environ/ANTHROPIC_API_KEY",
+                },
+            })
+            seen_models.add(model_id)
 
     # 2. Ollama models from config
     ollama_cfg = backends.get("ollama", {})

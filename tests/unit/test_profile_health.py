@@ -3,12 +3,11 @@
 import time
 
 from corvus.auth.profile_health import (
-    COOLDOWN_THRESHOLDS,
+    get_profile_health,
     record_profile_failure,
     record_profile_success,
-    get_profile_health,
 )
-from corvus.auth.profiles import AuthProfileStore, ApiKeyCredential, ProfileUsageStats
+from corvus.auth.profiles import ApiKeyCredential, AuthProfileStore, ProfileUsageStats
 
 
 class TestRecordProfileFailure:

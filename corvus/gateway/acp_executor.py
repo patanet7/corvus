@@ -15,7 +15,7 @@ from typing import TYPE_CHECKING, Any
 
 from corvus.acp.client import ACPClientConfig, CorvusACPClient
 from corvus.acp.events import translate_acp_update
-from corvus.acp.sandbox import build_acp_env
+from corvus.acp.sandbox import build_acp_child_env
 from corvus.acp.session import AcpSessionTracker
 from corvus.gateway.workspace_runtime import prepare_agent_workspace
 from corvus.sanitize import sanitize
@@ -192,6 +192,21 @@ async def execute_acp_run(
             phase="routing",
             summary="Routing to ACP agent",
         )
+        await runtime.emitter.emit(
+            "routing_decision",
+            agent=agent_name,
+            backend="acp",
+            source="websocket",
+            query_preview=run_message[:200],
+            task_type=route.task_type,
+            subtask_id=route.subtask_id,
+            skill=route.skill,
+        )
+
+        # Check break-glass for secret access override
+        allow_secret_access = runtime.break_glass.is_active(
+            user=user, session_id=session_id,
+        )
 
         # Build and spawn ACP client
         config = ACPClientConfig(
@@ -286,7 +301,10 @@ async def execute_acp_run(
                         assistant_summary = _preview_summary(" ".join(response_parts), limit=140)
 
             elif method == "fs/read_text_file":
-                result = await client.handle_fs_read(params.get("path", ""))
+                result = await client.handle_fs_read(
+                    params.get("path", ""),
+                    allow_secret_access=allow_secret_access,
+                )
                 resp_id = msg.get("id")
                 if resp_id is not None:
                     await client._write({"jsonrpc": "2.0", "id": resp_id, "result": result})
@@ -313,7 +331,11 @@ async def execute_acp_run(
                             )
                         continue
 
-                result = await client.handle_fs_write(params.get("path", ""), params.get("content", ""))
+                result = await client.handle_fs_write(
+                    params.get("path", ""),
+                    params.get("content", ""),
+                    allow_secret_access=allow_secret_access,
+                )
                 resp_id = msg.get("id")
                 if resp_id is not None:
                     await client._write({"jsonrpc": "2.0", "id": resp_id, "result": result})
@@ -347,13 +369,13 @@ async def execute_acp_run(
                                 {"jsonrpc": "2.0", "id": resp_id, "result": {"error": "User denied command"}}
                             )
                         continue
-                # Execute command in sandbox
+                # Execute command in locked-down child env
                 proc = await asyncio.create_subprocess_shell(
                     command,
                     stdout=asyncio.subprocess.PIPE,
                     stderr=asyncio.subprocess.PIPE,
                     cwd=str(workspace_cwd),
-                    env=build_acp_env(workspace=workspace_cwd),
+                    env=build_acp_child_env(workspace=workspace_cwd),
                 )
                 stdout, stderr = await proc.communicate()
                 output = sanitize(stdout.decode(errors="replace") + stderr.decode(errors="replace"))

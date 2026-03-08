@@ -293,7 +293,7 @@ _has_paperless = bool(os.environ.get("PAPERLESS_URL"))
 _skip_reason = "PAPERLESS_URL not set — skipping live Paperless contract tests"
 
 
-@pytest.fixture(autouse=True, scope="module")
+@pytest.fixture(autouse=True)
 def _configure_live():
     """Configure paperless tools from env vars for live tests."""
     url = os.environ.get("PAPERLESS_URL", "")
@@ -302,6 +302,7 @@ def _configure_live():
         configure(url, token)
 
 
+@pytest.mark.live
 @pytest.mark.skipif(not _has_paperless, reason=_skip_reason)
 class TestLivePaperlessSearch:
     """Live contract tests for paperless_search."""
@@ -327,6 +328,7 @@ class TestLivePaperlessSearch:
             assert "tags" in doc
 
 
+@pytest.mark.live
 @pytest.mark.skipif(not _has_paperless, reason=_skip_reason)
 class TestLivePaperlessTags:
     """Live contract tests for paperless_tags."""

@@ -94,7 +94,8 @@ disable_error_code = ["import-untyped"]
 testpaths = ["tests"]
 markers = [
     "slow: marks tests as slow (deselect with '-m \"not slow\"')",
-    "integration: marks integration tests requiring Docker",
+    "integration: marks integration tests requiring Docker or external services",
+    "live: marks tests that require live external services (deselect with '-m \"not live\"')",
 ]
 filterwarnings = [
     "ignore::DeprecationWarning:zxcvbn",

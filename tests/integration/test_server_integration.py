@@ -17,6 +17,8 @@ from pathlib import Path
 import pytest
 import requests
 
+pytestmark = pytest.mark.integration
+
 ROOT = Path(__file__).parent.parent.parent
 
 skip_no_docker = pytest.mark.skipif(

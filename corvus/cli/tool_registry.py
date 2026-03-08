@@ -1,19 +1,24 @@
-"""Corvus tool module registry.
+"""Corvus MCP Bridge Server — exposes agent tools over stdio MCP protocol.
 
-Maps module names to (configure_fn, create_tools_fn) pairs. Each module
-knows how to configure itself from env vars and produce a list of
-(tool_name, callable) tuples.
+Launched as a subprocess by the claude CLI via the generated MCP config.
+Wraps existing corvus.tools.* functions and memory toolkit as MCP tools.
 
-Extracted from the former MCP bridge to be shared by the tool server.
+Usage:
+    uv run python -m corvus.cli.mcp_bridge \
+        --agent homelab \
+        --modules-json '{"ha": {}, "obsidian": {"read": true}}' \
+        --memory-domain homelab
 """
 
 from __future__ import annotations
 
+import argparse
+import json
 import logging
 import os
 from collections.abc import Callable
 
-logger = logging.getLogger("corvus-tool-registry")
+logger = logging.getLogger("corvus-mcp-bridge")
 
 # Module name -> (configure_fn, create_tools_fn) mapping.
 # Populated lazily via _populate_module_registry().
@@ -219,3 +224,142 @@ def _populate_module_registry() -> None:
         ]
 
     _MODULE_REGISTRY["drive"] = (_drive_configure, _drive_tools)
+
+
+def register_module_tools(
+    *,
+    tool_registrar: Callable,
+    module_configs: dict[str, dict],
+    skip_configure_errors: bool = False,
+) -> list[str]:
+    """Configure and register tool module functions.
+
+    Args:
+        tool_registrar: Callable that takes (name, description) and returns a decorator.
+        module_configs: Dict of module_name -> module config from agent spec.
+        skip_configure_errors: If True, skip modules that fail to configure.
+
+    Returns:
+        List of registered tool names.
+    """
+    _populate_module_registry()
+    registered: list[str] = []
+
+    for module_name, module_cfg in module_configs.items():
+        entry = _MODULE_REGISTRY.get(module_name)
+        if entry is None:
+            logger.warning("Unknown module '%s' — skipping", module_name)
+            continue
+
+        configure_fn, create_tools_fn = entry
+        try:
+            configure_fn(module_cfg)
+        except Exception as exc:
+            if skip_configure_errors:
+                logger.warning("Module '%s' configure failed: %s — skipping", module_name, exc)
+                continue
+            raise
+
+        tools = create_tools_fn(module_cfg)
+        for tool_name, tool_fn in tools:
+            tool_registrar(name=tool_name)(tool_fn)
+            registered.append(tool_name)
+
+    return registered
+
+
+def register_memory_tools(
+    *,
+    tool_registrar: Callable,
+    agent_name: str,
+    memory_domain: str,
+) -> list[str]:
+    """Register memory toolkit tools on the MCP server.
+
+    Args:
+        tool_registrar: Callable that takes (name, description) and returns a decorator.
+        agent_name: Agent name for memory domain scoping.
+        memory_domain: Agent's own_domain for memory operations.
+
+    Returns:
+        List of registered tool names.
+    """
+    from typing import Any
+
+    from corvus.config import MEMORY_CONFIG, MEMORY_DB
+    from corvus.memory import MemoryConfig, MemoryHub
+    from corvus.memory.toolkit import create_memory_toolkit
+
+    config = MemoryConfig.from_file(MEMORY_CONFIG, default_db_path=MEMORY_DB)
+    hub = MemoryHub(config)
+
+    # The bridge runs outside the full gateway runtime, so we provide a
+    # simple resolver that grants the agent write access to its own domain.
+    # The agent's permissions were already validated when the MCP config
+    # was generated — only agents with the module enabled reach here.
+    def _bridge_memory_access(name: str) -> dict[str, Any]:
+        return {
+            "own_domain": memory_domain,
+            "can_read_shared": True,
+            "can_write": True,
+            "readable_domains": None,
+        }
+
+    def _bridge_readable_domains(name: str) -> list[str]:
+        return [memory_domain, "shared"]
+
+    hub.set_resolvers(_bridge_memory_access, _bridge_readable_domains)
+
+    memory_tools = create_memory_toolkit(hub, agent_name=agent_name, own_domain=memory_domain)
+    registered: list[str] = []
+
+    for mem_tool in memory_tools:
+        tool_registrar(name=mem_tool.name, description=mem_tool.description)(mem_tool.fn)
+        registered.append(mem_tool.name)
+
+    return registered
+
+
+def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
+    """Parse CLI arguments for the MCP bridge server."""
+    parser = argparse.ArgumentParser(prog="corvus-mcp-bridge")
+    parser.add_argument("--agent", required=True, help="Agent name")
+    parser.add_argument("--modules-json", default="{}", help="JSON dict of module configs")
+    parser.add_argument("--memory-domain", default="shared", help="Memory domain")
+    return parser.parse_args(argv)
+
+
+def main() -> None:
+    """Entry point for the MCP bridge server."""
+    from mcp.server.fastmcp import FastMCP
+
+    logging.basicConfig(level=logging.WARNING, format="%(message)s")
+    args = parse_args()
+    module_configs: dict[str, dict] = json.loads(args.modules_json)
+
+    mcp = FastMCP(f"corvus-tools-{args.agent}")
+
+    # Register domain tool modules
+    registered = register_module_tools(
+        tool_registrar=mcp.tool,
+        module_configs=module_configs,
+        skip_configure_errors=True,
+    )
+    logger.info("Registered %d module tools for %s", len(registered), args.agent)
+
+    # Register memory tools
+    try:
+        mem_registered = register_memory_tools(
+            tool_registrar=mcp.tool,
+            agent_name=args.agent,
+            memory_domain=args.memory_domain,
+        )
+        logger.info("Registered %d memory tools", len(mem_registered))
+    except Exception as exc:
+        logger.warning("Memory toolkit init failed: %s — memory tools unavailable", exc)
+
+    mcp.run()
+
+
+if __name__ == "__main__":
+    main()

@@ -12,7 +12,6 @@ def test_default_args() -> None:
     assert args.max_turns is None
     assert args.list_agents is False
     assert args.list_models is False
-    assert args.print_mode is False
 
 
 def test_agent_flag() -> None:
@@ -49,10 +48,6 @@ def test_list_models_flag() -> None:
     args = parse_args(["--list-models"])
     assert args.list_models is True
 
-
-def test_print_mode_flag() -> None:
-    args = parse_args(["--print"])
-    assert args.print_mode is True
 
 
 def test_permission_flag() -> None:

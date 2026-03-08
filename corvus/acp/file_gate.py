@@ -53,6 +53,7 @@ def check_file_access(
     operation: str,
     parent_allows_read: bool = True,
     parent_allows_write: bool = True,
+    allow_secret_access: bool = False,
 ) -> FileGateResult:
     """Check whether an ACP agent may access a file path.
 
@@ -60,6 +61,7 @@ def check_file_access(
     1. Path resolution (absolute or relative to workspace_root)
     2. Workspace boundary enforcement (resolved path must be inside workspace_root)
     3. Secret pattern matching (blocks dotenv, PEM, SSH keys, credentials)
+       — skipped if allow_secret_access is True (break-glass mode)
     4. Parent agent policy (read/write permission flags)
 
     Args:
@@ -68,6 +70,7 @@ def check_file_access(
         operation: Either "read" or "write".
         parent_allows_read: Whether the parent agent permits read operations.
         parent_allows_write: Whether the parent agent permits write operations.
+        allow_secret_access: If True, skip secret pattern checks (break-glass).
 
     Returns:
         A FileGateResult indicating whether access is allowed.
@@ -94,9 +97,9 @@ def check_file_access(
             reason=f"Blocked: path escapes workspace boundary (resolved to {resolved})",
         )
 
-    # Step 3: Secret pattern check
+    # Step 3: Secret pattern check (skipped in break-glass mode)
     relative_str = str(relative)
-    if _matches_secret_pattern(relative_str):
+    if not allow_secret_access and _matches_secret_pattern(relative_str):
         logger.warning(
             "File gate blocked %s of %r: matches secret pattern",
             operation,

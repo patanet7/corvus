@@ -23,6 +23,8 @@ import requests
 
 from corvus.router import VALID_AGENTS, RouterAgent
 
+pytestmark = [pytest.mark.integration, pytest.mark.live]
+
 OLLAMA_URL = os.environ.get("ANTHROPIC_BASE_URL", "http://localhost:11434")
 
 

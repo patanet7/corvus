@@ -266,40 +266,6 @@ def _clean_sanitize_patterns():
     _CREDENTIAL_PATTERNS.extend(original)
 
 
-@pytest.fixture()
-def _clean_tool_modules():
-    """Reset tool module globals between tests."""
-    from corvus.tools import firefly, ha, obsidian, paperless
-
-    orig_ha = (ha._ha_url, ha._ha_token)
-    orig_pl = (paperless._paperless_url, paperless._paperless_token)
-    orig_ff = (firefly._firefly_url, firefly._firefly_token)
-    orig_ob = obsidian._client
-    yield
-    ha._ha_url, ha._ha_token = orig_ha
-    paperless._paperless_url, paperless._paperless_token = orig_pl
-    firefly._firefly_url, firefly._firefly_token = orig_ff
-    obsidian._client = orig_ob
-
-
-@pytest.fixture()
-def _clean_anthropic_env():
-    """Save and restore credential env vars set by inject()."""
-    env_keys = [
-        "ANTHROPIC_API_KEY",
-        "HA_URL", "HA_TOKEN",
-        "PAPERLESS_URL", "PAPERLESS_API_TOKEN",
-        "FIREFLY_URL", "FIREFLY_API_TOKEN",
-        "OBSIDIAN_URL", "OBSIDIAN_API_KEY",
-    ]
-    originals = {k: os.environ.get(k) for k in env_keys}
-    yield
-    for k, v in originals.items():
-        if v is not None:
-            os.environ[k] = v
-        else:
-            os.environ.pop(k, None)
-
 
 @pytest.fixture()
 def encrypted_store(tmp_path):
@@ -324,7 +290,7 @@ def malicious_server():
 # ===========================================================================
 
 
-@pytest.mark.usefixtures("_clean_sanitize_patterns", "_clean_tool_modules", "_clean_anthropic_env")
+@pytest.mark.usefixtures("_clean_sanitize_patterns")
 class TestFullStartupChain:
     """Verify the complete credential pipeline from encrypted file to redaction."""
 
@@ -340,19 +306,19 @@ class TestFullStartupChain:
             assert _REDACTED in result
 
     def test_inject_sets_ha_env_vars(self, encrypted_store):
-        """inject() sets HA env vars from store."""
+        """inject() sets HA_URL and HA_TOKEN env vars from store."""
         encrypted_store.inject()
         assert os.environ.get("HA_URL") == "http://homeassistant.local:8123"
         assert os.environ.get("HA_TOKEN") == HA_TOKEN
 
     def test_inject_sets_paperless_env_vars(self, encrypted_store):
-        """inject() sets Paperless env vars from store."""
+        """inject() sets PAPERLESS_URL and PAPERLESS_API_TOKEN env vars."""
         encrypted_store.inject()
         assert os.environ.get("PAPERLESS_URL") == "http://localhost:8010"
         assert os.environ.get("PAPERLESS_API_TOKEN") == PAPERLESS_TOKEN
 
     def test_inject_sets_firefly_env_vars(self, encrypted_store):
-        """inject() sets Firefly env vars from store."""
+        """inject() sets FIREFLY_URL and FIREFLY_API_TOKEN env vars."""
         encrypted_store.inject()
         assert os.environ.get("FIREFLY_URL") == "http://localhost:8081"
         assert os.environ.get("FIREFLY_API_TOKEN") == FIREFLY_TOKEN
@@ -382,7 +348,7 @@ class TestFullStartupChain:
 # ===========================================================================
 
 
-@pytest.mark.usefixtures("_clean_sanitize_patterns", "_clean_tool_modules")
+@pytest.mark.usefixtures("_clean_sanitize_patterns")
 class TestMaliciousAPILeakPrevention:
     """Adversarial fake API server tries to exfiltrate credentials.
 
@@ -457,7 +423,7 @@ class TestMaliciousAPILeakPrevention:
 # ===========================================================================
 
 
-@pytest.mark.usefixtures("_clean_sanitize_patterns", "_clean_tool_modules")
+@pytest.mark.usefixtures("_clean_sanitize_patterns")
 class TestCrossToolIsolation:
     """Verify credentials from one service don't leak through another's output."""
 
@@ -503,7 +469,7 @@ class TestCrossToolIsolation:
 # ===========================================================================
 
 
-@pytest.mark.usefixtures("_clean_sanitize_patterns", "_clean_tool_modules")
+@pytest.mark.usefixtures("_clean_sanitize_patterns")
 class TestErrorMessageLeaks:
     """Verify error messages from failed requests don't leak credentials."""
 
@@ -638,7 +604,7 @@ class TestSanitizationBypass:
 # ===========================================================================
 
 
-@pytest.mark.usefixtures("_clean_sanitize_patterns", "_clean_tool_modules")
+@pytest.mark.usefixtures("_clean_sanitize_patterns")
 class TestAdversarialExfiltration:
     """Simulate the 9-step adversarial credential isolation protocol.
 
@@ -775,7 +741,7 @@ class TestAdversarialExfiltration:
 # ===========================================================================
 
 
-@pytest.mark.usefixtures("_clean_sanitize_patterns", "_clean_tool_modules", "_clean_anthropic_env")
+@pytest.mark.usefixtures("_clean_sanitize_patterns")
 class TestEnvFallbackIntegration:
     """Verify the env-var fallback path also produces a sanitizable store."""
 

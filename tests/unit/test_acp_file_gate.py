@@ -162,3 +162,38 @@ class TestFileGatePathResolution:
         assert result.allowed is False
         assert "boundary" in result.reason.lower()
         assert result.resolved_path is None
+
+
+class TestFileGateBreakGlass:
+    """Tests for break-glass secret access override."""
+
+    def test_secret_allowed_with_break_glass(self, tmp_path: Path) -> None:
+        """With allow_secret_access=True, secret files should be readable."""
+        workspace = tmp_path / "workspace"
+        workspace.mkdir()
+        (workspace / ".env").write_text("SECRET=value")
+
+        result = check_file_access(
+            path=".env",
+            workspace_root=workspace,
+            operation="read",
+            allow_secret_access=True,
+        )
+
+        assert result.allowed is True
+        assert result.resolved_path is not None
+
+    def test_secret_blocked_without_break_glass(self, tmp_path: Path) -> None:
+        """Without break-glass, secret files are still blocked."""
+        workspace = tmp_path / "workspace"
+        workspace.mkdir()
+        (workspace / ".env").write_text("SECRET=value")
+
+        result = check_file_access(
+            path=".env",
+            workspace_root=workspace,
+            operation="read",
+            allow_secret_access=False,
+        )
+
+        assert result.allowed is False

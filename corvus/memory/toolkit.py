@@ -6,7 +6,6 @@ and cannot be overridden by the agent.
 
 from __future__ import annotations
 
-import json
 import logging
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
@@ -63,7 +62,13 @@ def create_memory_toolkit(
             limit=limit,
             domain=domain,
         )
-        return json.dumps([r.to_dict() for r in results])
+        if not results:
+            return "no_results"
+        lines = []
+        for r in results:
+            d = r.to_dict()
+            lines.append(f"{d['id']}|{d.get('domain','')}|{d.get('importance','')}|{d['content'][:120]}")
+        return "\n".join(lines)
 
     async def memory_save(
         content: str,
@@ -81,12 +86,7 @@ def create_memory_toolkit(
         """
         valid_visibility = {"private", "shared"}
         if visibility not in valid_visibility:
-            return json.dumps(
-                {
-                    "status": "error",
-                    "error": f"visibility must be one of {sorted(valid_visibility)}, got {visibility!r}",
-                }
-            )
+            return f"error:visibility must be private|shared, got {visibility!r}"
 
         importance = max(0.0, min(1.0, importance))
 
@@ -104,14 +104,15 @@ def create_memory_toolkit(
         # The LLM will see a clear error instead of a JSON string that might be
         # misinterpreted as success.
         record_id = await hub.save(record, agent_name=agent_name)
-        return json.dumps({"id": record_id, "status": "saved"})
+        return f"saved:{record_id}"
 
     async def memory_get(record_id: str) -> str:
         """Retrieve a specific memory by its ID."""
         record = await hub.get(record_id, agent_name=agent_name)
         if record is None:
-            return json.dumps({"error": "not found"})
-        return json.dumps(record.to_dict())
+            return "not_found"
+        d = record.to_dict()
+        return f"{d['id']}|{d.get('domain','')}|{d.get('visibility','')}|{d.get('importance','')}|{d.get('tags','')}|{d['content']}"
 
     async def memory_list(
         domain: str | None = None,
@@ -123,23 +124,27 @@ def create_memory_toolkit(
             domain=domain,
             limit=limit,
         )
-        return json.dumps([r.to_dict() for r in records])
+        if not records:
+            return "empty"
+        lines = []
+        for r in records:
+            d = r.to_dict()
+            lines.append(f"{d['id']}|{d.get('domain','')}|{d.get('importance','')}|{d['content'][:80]}")
+        return "\n".join(lines)
 
     async def memory_forget(record_id: str) -> str:
         """Soft-delete a memory by ID. Only works for your own domain's memories."""
         try:
             ok = await hub.forget(record_id, agent_name=agent_name)
-            return json.dumps(
-                {"status": "forgotten" if ok else "not found"},
-            )
+            return "forgotten" if ok else "not_found"
         except PermissionError as e:
-            return json.dumps({"status": "error", "error": str(e)})
+            return f"error:{e}"
 
     return [
         MemoryTool(
             "memory_search",
             memory_search,
-            "Search memories by query. Returns ranked results.",
+            "Search memories by semantic query. Params: query (required), limit (int, default 10), domain (optional filter).",
             input_schema={
                 "type": "object",
                 "properties": {
@@ -153,8 +158,9 @@ def create_memory_toolkit(
         MemoryTool(
             "memory_save",
             memory_save,
-            "Save a new memory. Domain is auto-set. Choose visibility: "
-            "private (default, only you) or shared (all agents).",
+            "Save a new memory. Params: content (required, the text to save), "
+            "visibility ('private'|'shared', default 'private'), "
+            "tags (comma-separated string), importance (0.0-1.0, default 0.5, >=0.9 for evergreen).",
             input_schema={
                 "type": "object",
                 "properties": {
@@ -169,7 +175,7 @@ def create_memory_toolkit(
         MemoryTool(
             "memory_get",
             memory_get,
-            "Retrieve a specific memory by ID.",
+            "Retrieve a specific memory. Params: record_id (required, the memory UUID).",
             input_schema={
                 "type": "object",
                 "properties": {
@@ -181,7 +187,7 @@ def create_memory_toolkit(
         MemoryTool(
             "memory_list",
             memory_list,
-            "List recent memories, optionally filtered by domain.",
+            "List recent memories. Params: domain (optional filter), limit (int, default 20).",
             input_schema={
                 "type": "object",
                 "properties": {
@@ -193,7 +199,7 @@ def create_memory_toolkit(
         MemoryTool(
             "memory_forget",
             memory_forget,
-            "Soft-delete a memory by ID. Only works for your own domain.",
+            "Soft-delete a memory. Params: record_id (required). Only works for memories in your own domain.",
             input_schema={
                 "type": "object",
                 "properties": {

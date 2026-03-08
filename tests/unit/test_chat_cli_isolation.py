@@ -52,15 +52,15 @@ def test_no_disable_slash_commands():
     assert "--disable-slash-commands" not in cmd
 
 
-def test_setting_sources_project():
-    """CLI must pass --setting-sources project to block user-level plugins."""
+def test_setting_sources_user_project():
+    """CLI must pass --setting-sources user,project to load isolated settings."""
     runtime = _FakeRuntime()
     cmd = _build_claude_cmd(
         "/usr/bin/claude", runtime, "homelab", _make_args(),
         system_prompt="You are homelab.",
     )
     idx = cmd.index("--setting-sources")
-    assert cmd[idx + 1] == "project"
+    assert cmd[idx + 1] == "user,project"
 
 
 def test_no_strict_mcp_config():

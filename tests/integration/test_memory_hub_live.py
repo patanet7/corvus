@@ -882,21 +882,18 @@ class TestMemoryToolkit:
     def test_save_tool_auto_sets_domain(self, hub: MemoryHub) -> None:
         tools = create_memory_toolkit(hub, agent_name="finance")
         save_tool = next(t for t in tools if t.name == "memory_save")
-        result_json = run(
+        result = run(
             save_tool.fn(
                 content="salary data",
                 visibility="private",
                 tags="budget,salary",
             )
         )
-        result = json.loads(result_json)
-        assert result["status"] == "saved"
+        assert result.startswith("saved:")
         # Verify domain was auto-set to "finance"
         search_tool = next(t for t in tools if t.name == "memory_search")
-        search_json = run(search_tool.fn(query="salary"))
-        search_results = json.loads(search_json)
-        assert len(search_results) == 1
-        assert search_results[0]["domain"] == "finance"
+        search_result = run(search_tool.fn(query="salary"))
+        assert "finance" in search_result
 
     def test_search_tool_respects_visibility(self, hub: MemoryHub) -> None:
         # Save as finance
@@ -909,22 +906,21 @@ class TestMemoryToolkit:
         search_fn = next(t for t in lab_tools if t.name == "memory_search").fn
 
         # Homelab should NOT see finance private data
-        result_json = run(search_fn(query="salary"))
-        results = json.loads(result_json)
-        assert len(results) == 0
+        result = run(search_fn(query="salary"))
+        assert result == "no_results"
 
     def test_forget_tool_rejects_cross_domain(self, hub: MemoryHub) -> None:
         # Save as finance
         fin_tools = create_memory_toolkit(hub, agent_name="finance")
         save_fn = next(t for t in fin_tools if t.name == "memory_save").fn
-        result = json.loads(run(save_fn(content="to delete", visibility="private")))
+        save_result = run(save_fn(content="to delete", visibility="private"))
+        record_id = save_result.split(":", 1)[1]
 
         # Try to forget as homelab
         lab_tools = create_memory_toolkit(hub, agent_name="homelab")
         forget_fn = next(t for t in lab_tools if t.name == "memory_forget").fn
-        result_json = run(forget_fn(record_id=result["id"]))
-        result = json.loads(result_json)
-        assert result["status"] == "error"
+        result = run(forget_fn(record_id=record_id))
+        assert result.startswith("error:")
 
     def test_list_tool(self, hub: MemoryHub) -> None:
         tools = create_memory_toolkit(hub, agent_name="homelab")
@@ -934,18 +930,19 @@ class TestMemoryToolkit:
         run(save_fn(content="memory one", visibility="shared"))
         run(save_fn(content="memory two", visibility="shared"))
 
-        result_json = run(list_fn())
-        results = json.loads(result_json)
-        assert len(results) == 2
+        result = run(list_fn())
+        lines = result.strip().split("\n")
+        assert len(lines) == 2
 
     def test_get_tool(self, hub: MemoryHub) -> None:
         tools = create_memory_toolkit(hub, agent_name="homelab")
         save_fn = next(t for t in tools if t.name == "memory_save").fn
         get_fn = next(t for t in tools if t.name == "memory_get").fn
 
-        saved = json.loads(run(save_fn(content="findable", visibility="shared")))
-        got = json.loads(run(get_fn(record_id=saved["id"])))
-        assert got["content"] == "findable"
+        save_result = run(save_fn(content="findable", visibility="shared"))
+        record_id = save_result.split(":", 1)[1]
+        got = run(get_fn(record_id=record_id))
+        assert "findable" in got
 
 
 # ---------------------------------------------------------------------------

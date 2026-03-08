@@ -281,10 +281,14 @@ class TestCredentialStoreValues:
 
 
 class TestCredentialStoreInject:
-    """inject() calls configure() on tool modules with stored credentials."""
+    """inject() sets service env vars from stored credentials.
+
+    Module globals (e.g. ha._ha_url) are set later by TOOL_MODULE_DEFS.configure()
+    at CapabilitiesRegistry.resolve() time. inject() only sets env vars.
+    """
 
     def test_inject_sets_ha_env_vars(self, tmp_path):
-        """inject() sets HA env vars from store values."""
+        """inject() sets HA_URL and HA_TOKEN env vars from store values."""
         orig_url = os.environ.get("HA_URL")
         orig_token = os.environ.get("HA_TOKEN")
         try:
@@ -296,17 +300,20 @@ class TestCredentialStoreInject:
             store.load()
             store.inject()
 
-            assert os.environ.get("HA_URL") == "http://ha.test:8123"
-            assert os.environ.get("HA_TOKEN") == "ha_test_tok_42"
+            assert os.environ["HA_URL"] == "http://ha.test:8123"
+            assert os.environ["HA_TOKEN"] == "ha_test_tok_42"
         finally:
-            for k, v in [("HA_URL", orig_url), ("HA_TOKEN", orig_token)]:
-                if v is not None:
-                    os.environ[k] = v
-                else:
-                    os.environ.pop(k, None)
+            if orig_url is not None:
+                os.environ["HA_URL"] = orig_url
+            else:
+                os.environ.pop("HA_URL", None)
+            if orig_token is not None:
+                os.environ["HA_TOKEN"] = orig_token
+            else:
+                os.environ.pop("HA_TOKEN", None)
 
     def test_inject_sets_paperless_env_vars(self, tmp_path):
-        """inject() sets Paperless env vars from store values."""
+        """inject() sets PAPERLESS_URL and PAPERLESS_API_TOKEN env vars."""
         orig_url = os.environ.get("PAPERLESS_URL")
         orig_token = os.environ.get("PAPERLESS_API_TOKEN")
         try:
@@ -321,17 +328,20 @@ class TestCredentialStoreInject:
             store.load()
             store.inject()
 
-            assert os.environ.get("PAPERLESS_URL") == "http://paperless.test:8010"
-            assert os.environ.get("PAPERLESS_API_TOKEN") == "pk_test_abc"
+            assert os.environ["PAPERLESS_URL"] == "http://paperless.test:8010"
+            assert os.environ["PAPERLESS_API_TOKEN"] == "pk_test_abc"
         finally:
-            for k, v in [("PAPERLESS_URL", orig_url), ("PAPERLESS_API_TOKEN", orig_token)]:
-                if v is not None:
-                    os.environ[k] = v
-                else:
-                    os.environ.pop(k, None)
+            if orig_url is not None:
+                os.environ["PAPERLESS_URL"] = orig_url
+            else:
+                os.environ.pop("PAPERLESS_URL", None)
+            if orig_token is not None:
+                os.environ["PAPERLESS_API_TOKEN"] = orig_token
+            else:
+                os.environ.pop("PAPERLESS_API_TOKEN", None)
 
     def test_inject_sets_firefly_env_vars(self, tmp_path):
-        """inject() sets Firefly env vars from store values."""
+        """inject() sets FIREFLY_URL and FIREFLY_API_TOKEN env vars."""
         orig_url = os.environ.get("FIREFLY_URL")
         orig_token = os.environ.get("FIREFLY_API_TOKEN")
         try:
@@ -346,23 +356,32 @@ class TestCredentialStoreInject:
             store.load()
             store.inject()
 
-            assert os.environ.get("FIREFLY_URL") == "http://firefly.test:8081"
-            assert os.environ.get("FIREFLY_API_TOKEN") == "ff_test_xyz"
+            assert os.environ["FIREFLY_URL"] == "http://firefly.test:8081"
+            assert os.environ["FIREFLY_API_TOKEN"] == "ff_test_xyz"
         finally:
-            for k, v in [("FIREFLY_URL", orig_url), ("FIREFLY_API_TOKEN", orig_token)]:
-                if v is not None:
-                    os.environ[k] = v
-                else:
-                    os.environ.pop(k, None)
+            if orig_url is not None:
+                os.environ["FIREFLY_URL"] = orig_url
+            else:
+                os.environ.pop("FIREFLY_URL", None)
+            if orig_token is not None:
+                os.environ["FIREFLY_API_TOKEN"] = orig_token
+            else:
+                os.environ.pop("FIREFLY_API_TOKEN", None)
 
     def test_inject_skips_unconfigured_services(self, tmp_path):
         """Store with only HA — should not crash even though paperless/firefly missing."""
-        env_keys = ["HA_URL", "HA_TOKEN", "PAPERLESS_URL", "PAPERLESS_API_TOKEN", "FIREFLY_URL", "FIREFLY_API_TOKEN"]
-        originals = {k: os.environ.get(k) for k in env_keys}
+        orig_ha_url = os.environ.get("HA_URL")
+        orig_ha_token = os.environ.get("HA_TOKEN")
+        orig_p_url = os.environ.get("PAPERLESS_URL")
+        orig_f_url = os.environ.get("FIREFLY_URL")
         try:
             # Clear all service env vars before test
-            for k in env_keys:
-                os.environ.pop(k, None)
+            os.environ.pop("HA_URL", None)
+            os.environ.pop("HA_TOKEN", None)
+            os.environ.pop("PAPERLESS_URL", None)
+            os.environ.pop("PAPERLESS_API_TOKEN", None)
+            os.environ.pop("FIREFLY_URL", None)
+            os.environ.pop("FIREFLY_API_TOKEN", None)
 
             data = {
                 "ha": {"url": "http://ha.only:8123", "token": "ha_only_tok"},
@@ -373,18 +392,29 @@ class TestCredentialStoreInject:
             store.inject()  # Should not raise
 
             # HA env vars should be set
-            assert os.environ.get("HA_URL") == "http://ha.only:8123"
-            assert os.environ.get("HA_TOKEN") == "ha_only_tok"
+            assert os.environ["HA_URL"] == "http://ha.only:8123"
+            assert os.environ["HA_TOKEN"] == "ha_only_tok"
 
-            # Others should remain unset
-            assert os.environ.get("PAPERLESS_URL") is None
-            assert os.environ.get("FIREFLY_URL") is None
+            # Others should not be set
+            assert "PAPERLESS_URL" not in os.environ
+            assert "FIREFLY_URL" not in os.environ
         finally:
-            for k, v in originals.items():
-                if v is not None:
-                    os.environ[k] = v
-                else:
-                    os.environ.pop(k, None)
+            if orig_ha_url is not None:
+                os.environ["HA_URL"] = orig_ha_url
+            else:
+                os.environ.pop("HA_URL", None)
+            if orig_ha_token is not None:
+                os.environ["HA_TOKEN"] = orig_ha_token
+            else:
+                os.environ.pop("HA_TOKEN", None)
+            if orig_p_url is not None:
+                os.environ["PAPERLESS_URL"] = orig_p_url
+            else:
+                os.environ.pop("PAPERLESS_URL", None)
+            if orig_f_url is not None:
+                os.environ["FIREFLY_URL"] = orig_f_url
+            else:
+                os.environ.pop("FIREFLY_URL", None)
 
     def test_inject_sets_anthropic_env_var(self, tmp_path):
         """inject() sets ANTHROPIC_API_KEY env var."""
