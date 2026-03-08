@@ -37,3 +37,4 @@ frontend/storybook-static/
 # Runtime
 *.log
 *.pid
+.worktrees/
