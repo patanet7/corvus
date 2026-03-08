@@ -394,7 +394,7 @@ For large tool catalogs, Claude queries a tool catalog on-demand rather than loa
 | 004 | `parent_allows_*` hardcoded True | Policy engine — tier determines permissions. |
 | 005 | Darwin sandbox `allow default` | Subprocess gets env whitelist only. Tools run in-process. |
 | 006 | No tool-call audit | `on_tool_call` hook logs every invocation. |
-| 007 | WebSocket auto-auth localhost | Needs auth middleware (flagged for separate follow-up). |
+| 007 | WebSocket auto-auth localhost | Session token auth for WebSocket upgrade (Phase 1, not deferred). |
 | 008 | No rate limiting on tools | ToolContext can enforce rate limits per tool per session. |
 | 009 | Cross-domain memory write | ToolContext.permissions enforces domain isolation. |
 | 010 | Skills lack integrity check | Skills copied to workspace at spawn — Corvus controls what gets copied. |
@@ -421,3 +421,53 @@ For large tool catalogs, Claude queries a tool catalog on-demand rather than loa
 | Summarization | Hook-driven from audit trail, no extra LLM call |
 | Runtime portability | RuntimeAdapter protocol, CLI is swappable |
 | Future scaling | Tool Search API for large catalogs |
+
+---
+
+## 9. Security Audit Findings (2026-03-08)
+
+Post-design security audit identified 15 findings. All incorporated into implementation plan.
+
+### Critical
+
+| ID | Finding | Mitigation |
+|----|---------|------------|
+| F-001 | Full env inheritance to CLI subprocess (`env = dict(os.environ)`) | Implement `_ALLOWED_ENV` whitelist + add `TMPDIR`. Credentials flow via ToolContext only. |
+| F-002 | `CORVUS_BREAK_GLASS` env var bypass still live (`config.py:41`) | Remove entirely. All break-glass via Argon2id password + HMAC token. |
+| F-003 | WebSocket auto-auth localhost = zero auth | Session token auth (HMAC cookie) for WebSocket upgrade. Promoted to Phase 1. |
+
+### High
+
+| ID | Finding | Mitigation |
+|----|---------|------------|
+| F-004 | Bash blocklist trivially bypassed | Eliminated by MCP stdio executor (no Bash access). |
+| F-005 | `parent_allows_*` hardcoded True | Wire to agent spec permission tier and tool module declarations. |
+| F-006 | No TTL cap on break-glass activation | Enforce `max_ttl` from policy config: `min(requested, max_ttl)`. |
+| F-007 | Confirm queue fallthrough to allow | Default to `PermissionResultDeny`. Allow only in authenticated break-glass. |
+| F-008 | No rate limiting on tool calls | Sliding-window rate limiter per tool per session (10/min mutations, 60/min reads). |
+
+### Medium
+
+| ID | Finding | Mitigation |
+|----|---------|------------|
+| F-009 | Workspace snapshot copies sensitive files | Purpose-built workspace (design Section 5). Interim: add `.env`, `config/`, `*.hash` to `_SNAPSHOT_IGNORE`. |
+| F-010 | Darwin sandbox `(allow default)` too permissive | Restrict file reads to workspace + allowed system dirs. |
+| F-011 | Cross-domain memory write — API-layer enforcement gap | Validate domain against agent's `own_domain` at API layer before MemoryHub. |
+| F-012 | Lockout state file has no integrity protection | HMAC integrity on `lockout.json`. Verify `passphrase.hash` perms on every read. |
+
+### Low
+
+| ID | Finding | Mitigation |
+|----|---------|------------|
+| F-013 | No session timeout | Configurable idle timeout with auto break-glass deactivation. |
+| F-014 | HMAC token scheme not yet implemented | Implement as designed. Crypto-random signing key (not derived from passphrase), with rotation. |
+| F-015 | Denied tool calls not in persistent audit log | Log all `PermissionResultDeny` decisions to persistent storage. |
+
+### Additional Recommendations
+
+- **Symlink attacks:** Use `tempfile.mkdtemp()` with `0o700` perms for workspace, not predictable `/tmp/corvus-workspaces/`
+- **HMAC signing key:** Crypto-random, persisted securely, with rotation plan. Not derived from passphrase.
+- **RuntimeAdapter security contract:** Document invariants adapters must maintain (env whitelist, permissions.deny composition)
+- **Tool result sanitization:** Scrub credential patterns from tool outputs before they reach agent context
+- **Skill integrity:** Checksum skill files at copy time, verify before agent reads them
+- **`ANTHROPIC_BASE_URL` in env whitelist:** Only include when LiteLLM proxy is confirmed running
