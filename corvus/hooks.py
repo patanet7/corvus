@@ -1,6 +1,11 @@
 """Security and logging hooks for the Corvus gateway.
 
 Uses HookMatcher from claude_agent_sdk to intercept tool calls.
+
+TODO: The Bash blocklist (ENV_PATTERNS / check_bash_safety) is superseded by
+permissions.deny + no-Bash-access in the MCP stdio server and tool_catalog.
+The hook infrastructure (create_hooks, pre/post_tool_use) is still used by
+the gateway path (corvus/gateway/options.py -> build_hooks).
 """
 
 import logging
