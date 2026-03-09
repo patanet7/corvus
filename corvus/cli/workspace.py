@@ -22,6 +22,21 @@ from pathlib import Path
 logger = logging.getLogger("corvus-workspace")
 
 
+def _validate_skill_filename(filename: str, skills_dir: Path) -> None:
+    """Reject skill filenames that escape the skills directory.
+
+    Raises ValueError for path traversal attempts, absolute paths,
+    or filenames containing directory separators.
+    """
+    if not filename:
+        raise ValueError("Skill filename cannot be empty")
+    if os.sep in filename or "/" in filename or "\\" in filename:
+        raise ValueError(f"Skill filename must not contain path separators: {filename!r}")
+    resolved = (skills_dir / filename).resolve()
+    if not resolved.parent == skills_dir.resolve():
+        raise ValueError(f"Skill filename escapes skills directory: {filename!r}")
+
+
 def create_workspace(
     *,
     agent_name: str,
@@ -62,6 +77,7 @@ def create_workspace(
         skills_dir = workspace / "skills"
         skills_dir.mkdir()
         for filename, content in skills.items():
+            _validate_skill_filename(filename, skills_dir)
             (skills_dir / filename).write_text(content, encoding="utf-8")
 
         # Compute and store skill checksums for integrity verification

@@ -17,6 +17,7 @@ from pathlib import Path
 import pytest
 
 from corvus.cli.workspace import (
+    _validate_skill_filename,
     compute_skill_checksums,
     create_workspace,
     verify_skill_integrity,
@@ -160,3 +161,45 @@ class TestCreateWorkspaceChecksums:
         # Verify integrity passes
         violations = verify_skill_integrity(ws, stored_checksums)
         assert violations == [], f"Unexpected violations: {violations}"
+
+
+class TestSkillFilenameValidation:
+    """Tests for path traversal prevention in skill filenames."""
+
+    def test_rejects_dotdot_traversal(self, tmp_path):
+        skills_dir = tmp_path / "skills"
+        skills_dir.mkdir()
+        with pytest.raises(ValueError, match="path separators"):
+            _validate_skill_filename("../../../etc/passwd", skills_dir)
+
+    def test_rejects_forward_slash(self, tmp_path):
+        skills_dir = tmp_path / "skills"
+        skills_dir.mkdir()
+        with pytest.raises(ValueError, match="path separators"):
+            _validate_skill_filename("subdir/evil.md", skills_dir)
+
+    def test_rejects_backslash(self, tmp_path):
+        skills_dir = tmp_path / "skills"
+        skills_dir.mkdir()
+        with pytest.raises(ValueError, match="path separators"):
+            _validate_skill_filename("subdir\\evil.md", skills_dir)
+
+    def test_rejects_empty_filename(self, tmp_path):
+        skills_dir = tmp_path / "skills"
+        skills_dir.mkdir()
+        with pytest.raises(ValueError, match="empty"):
+            _validate_skill_filename("", skills_dir)
+
+    def test_accepts_normal_filename(self, tmp_path):
+        skills_dir = tmp_path / "skills"
+        skills_dir.mkdir()
+        _validate_skill_filename("search-skill.md", skills_dir)
+
+    def test_accepts_filename_with_dots(self, tmp_path):
+        skills_dir = tmp_path / "skills"
+        skills_dir.mkdir()
+        _validate_skill_filename("my.skill.v2.md", skills_dir)
+
+    def test_create_workspace_rejects_traversal(self, workspace_dir):
+        with pytest.raises(ValueError, match="path separators"):
+            workspace_dir(skills={"../../../etc/passwd": "evil content"})
