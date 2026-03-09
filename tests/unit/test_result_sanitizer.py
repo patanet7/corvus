@@ -6,6 +6,7 @@ non-sensitive text passes through unchanged.
 
 from __future__ import annotations
 
+import re
 import time
 
 from corvus.security.sanitizer import SANITIZER_PATTERNS, sanitize_tool_result
@@ -141,7 +142,7 @@ class TestJWTRedaction:
             "eyJzdWIiOiIxMjM0NTY3ODkwIiwibmFtZSI6IkpvaG4gRG9lIn0."
             "SflKxwRJSMeKKF2QT4fwpMeJf36POk6yJV_adQssw5c"
         )
-        raw = f"Token: {jwt}"
+        raw = f"JWT value is {jwt} here"
         result = _assert_redacted(raw, must_not_contain="eyJhbGciOiJIUzI1NiI")
         assert "[REDACTED_JWT]" in result
 
@@ -331,9 +332,10 @@ class TestPerformance:
 class TestHexTokenRedaction:
     def test_64_char_hex_redacted(self) -> None:
         token = "a1b2c3d4" * 8  # 64 chars
-        raw = f"ghp_{token}"
+        raw = f"token is {token} here"
         result = sanitize_tool_result(raw)
         assert token not in result
+        assert "[REDACTED_HEX]" in result
 
     def test_40_char_hex_not_redacted(self) -> None:
         sha = "a1b2c3d4e5" * 4  # 40 chars
