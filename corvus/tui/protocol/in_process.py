@@ -11,6 +11,7 @@ import logging
 import uuid
 from collections.abc import Callable, Coroutine
 from datetime import datetime
+from pathlib import Path
 from typing import Any
 
 from corvus.gateway.chat_session import ChatSession
@@ -39,15 +40,51 @@ class InProcessGateway(GatewayProtocol):
     # ------------------------------------------------------------------
 
     async def connect(self) -> None:
-        """Build the gateway runtime in-process."""
+        """Build the gateway runtime in-process and start all services.
+
+        Mirrors the server lifespan: LiteLLM proxy, supervisor heartbeat,
+        scheduler, model discovery.
+        """
         if self._connected:
             return
         self._runtime = build_runtime()
+
+        # Start LiteLLM proxy (sets ANTHROPIC_BASE_URL for router)
+        try:
+            await self._runtime.litellm_manager.start(Path("config/models.yaml"))
+            logger.info("LiteLLM proxy started")
+        except Exception as exc:
+            logger.warning("LiteLLM proxy failed to start: %s", exc)
+
+        self._runtime.model_router.discover_models()
+
+        # Start supervisor heartbeat
+        await self._runtime.supervisor.start()
+        logger.info("AgentSupervisor heartbeat started")
+
+        # Start scheduler
+        self._runtime.scheduler.load()
+        await self._runtime.scheduler.start()
+        logger.info("CronScheduler started")
+
         self._connected = True
-        logger.info("In-process gateway connected")
+        logger.info("In-process gateway connected (full stack)")
 
     async def disconnect(self) -> None:
-        """Tear down the runtime and clear session state."""
+        """Tear down the runtime — stop LiteLLM, supervisor, scheduler."""
+        if self._runtime is not None:
+            try:
+                await self._runtime.litellm_manager.stop()
+            except Exception:
+                pass
+            try:
+                await self._runtime.supervisor.graceful_shutdown()
+            except Exception:
+                pass
+            try:
+                await self._runtime.scheduler.stop()
+            except Exception:
+                pass
         self._session = None
         self._runtime = None
         self._connected = False
