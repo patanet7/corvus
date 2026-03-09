@@ -17,6 +17,7 @@ from corvus.acp.client import ACPClientConfig, CorvusACPClient
 from corvus.acp.events import translate_acp_update
 from corvus.acp.sandbox import build_acp_child_env
 from corvus.acp.session import AcpSessionTracker
+from corvus.agents.spec import AgentSpec
 from corvus.gateway.workspace_runtime import prepare_agent_workspace
 from corvus.sanitize import sanitize
 
@@ -40,6 +41,26 @@ def _preview_summary(text: str, limit: int = 160) -> str:
     if len(compact) <= limit:
         return compact
     return compact[: limit - 1] + "\u2026"
+
+
+def _resolve_parent_allows(spec: AgentSpec) -> dict[str, bool]:
+    """Derive parent_allows_read/write/bash from the agent's declared builtins.
+
+    Only capabilities explicitly listed in the agent spec's tools.builtin
+    list are granted. Edit implies write capability since it modifies files.
+
+    Args:
+        spec: The agent specification containing tool configuration.
+
+    Returns:
+        Dict with keys "read", "write", "bash" mapping to booleans.
+    """
+    builtins = spec.tools.builtin if spec.tools else []
+    return {
+        "read": "Read" in builtins,
+        "write": "Write" in builtins or "Edit" in builtins,
+        "bash": "Bash" in builtins,
+    }
 
 
 def _route_payload(route: TaskRoute, *, route_index: int) -> dict:
@@ -114,10 +135,11 @@ async def execute_acp_run(
     workspace_cwd = prepare_agent_workspace(session_id=session_id, agent_name=agent_name)
     active_model_id = f"acp/{acp_agent_name}"
 
-    # Determine parent policy from agent spec
-    parent_allows_read = True
-    parent_allows_write = True
-    parent_allows_bash = True
+    # Determine parent policy from agent spec builtins
+    allows = _resolve_parent_allows(agent_spec) if agent_spec else {"read": True, "write": True, "bash": True}
+    parent_allows_read = allows["read"]
+    parent_allows_write = allows["write"]
+    parent_allows_bash = allows["bash"]
 
     chunk_index = 0
     response_parts: list[str] = []
