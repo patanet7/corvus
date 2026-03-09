@@ -3,6 +3,7 @@
 import json
 from pathlib import Path
 
+from rich.columns import Columns
 from rich.console import Console
 from rich.live import Live
 from rich.markdown import Markdown
@@ -588,8 +589,6 @@ class ChatRenderer:
         right_content: str,
     ) -> None:
         """Render two side-by-side panels for split mode."""
-        from rich.columns import Columns
-
         left_color = self._theme.agent_color(split_manager.left_agent)
         right_color = self._theme.agent_color(split_manager.right_agent)
 

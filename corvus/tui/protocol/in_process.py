@@ -110,7 +110,8 @@ class InProcessGateway(GatewayProtocol):
         parses them into ProtocolEvent objects, and forwards them to the
         registered callback.
         """
-        assert self._runtime is not None, "connect() must be called before send_message()"
+        if self._runtime is None:
+            raise RuntimeError("Gateway not connected — call connect() before send_message()")
 
         sid = session_id or (self._session.session_id if self._session else str(uuid.uuid4()))
 
@@ -176,7 +177,8 @@ class InProcessGateway(GatewayProtocol):
             session.current_turn_id = None
             return
 
-        assert dispatch_resolution is not None
+        if dispatch_resolution is None:
+            raise RuntimeError("Dispatch resolution returned None without an error — this should not happen")
         try:
             await session._execute_dispatch_lifecycle(
                 dispatch_id=dispatch_id,
@@ -216,7 +218,8 @@ class InProcessGateway(GatewayProtocol):
 
     async def list_sessions(self) -> list[SessionSummary]:
         """Return summaries of all sessions from the session manager."""
-        assert self._runtime is not None, "connect() must be called before list_sessions()"
+        if self._runtime is None:
+            raise RuntimeError("Gateway not connected — call connect() before list_sessions()")
 
         rows = self._runtime.session_mgr.list()
         summaries: list[SessionSummary] = []
@@ -249,7 +252,8 @@ class InProcessGateway(GatewayProtocol):
 
     async def resume_session(self, session_id: str) -> SessionDetail:
         """Load full session detail including message history."""
-        assert self._runtime is not None, "connect() must be called before resume_session()"
+        if self._runtime is None:
+            raise RuntimeError("Gateway not connected — call connect() before resume_session()")
 
         session_row = self._runtime.session_mgr.get(session_id)
         if session_row is None:
@@ -289,7 +293,8 @@ class InProcessGateway(GatewayProtocol):
 
     async def list_agents(self) -> list[dict[str, Any]]:
         """Return metadata for all enabled agents."""
-        assert self._runtime is not None, "connect() must be called before list_agents()"
+        if self._runtime is None:
+            raise RuntimeError("Gateway not connected — call connect() before list_agents()")
 
         specs = self._runtime.agent_registry.list_enabled()
         return [
@@ -304,7 +309,8 @@ class InProcessGateway(GatewayProtocol):
 
     async def list_models(self) -> list[dict[str, Any]]:
         """Return metadata for all available models."""
-        assert self._runtime is not None, "connect() must be called before list_models()"
+        if self._runtime is None:
+            raise RuntimeError("Gateway not connected — call connect() before list_models()")
 
         models = self._runtime.model_router.list_available_models()
         return [m.to_dict() for m in models]
@@ -315,7 +321,8 @@ class InProcessGateway(GatewayProtocol):
 
     async def memory_search(self, query: str, agent_name: str, limit: int = 10) -> list[dict[str, Any]]:
         """Search memories via the runtime's MemoryHub."""
-        assert self._runtime is not None, "connect() must be called before memory_search()"
+        if self._runtime is None:
+            raise RuntimeError("Gateway not connected — call connect() before memory_search()")
 
         results = await self._runtime.memory_hub.search(
             query, agent_name=agent_name, limit=limit,
@@ -324,7 +331,8 @@ class InProcessGateway(GatewayProtocol):
 
     async def memory_list(self, agent_name: str, limit: int = 20) -> list[dict[str, Any]]:
         """List recent memories via the runtime's MemoryHub."""
-        assert self._runtime is not None, "connect() must be called before memory_list()"
+        if self._runtime is None:
+            raise RuntimeError("Gateway not connected — call connect() before memory_list()")
 
         results = await self._runtime.memory_hub.list_memories(
             agent_name=agent_name, limit=limit,
@@ -333,7 +341,8 @@ class InProcessGateway(GatewayProtocol):
 
     async def memory_save(self, content: str, agent_name: str) -> str:
         """Save a new memory via the runtime's MemoryHub."""
-        assert self._runtime is not None, "connect() must be called before memory_save()"
+        if self._runtime is None:
+            raise RuntimeError("Gateway not connected — call connect() before memory_save()")
 
         record = MemoryRecord(
             id=str(uuid.uuid4()),
@@ -346,7 +355,8 @@ class InProcessGateway(GatewayProtocol):
 
     async def memory_forget(self, record_id: str, agent_name: str) -> bool:
         """Soft-delete a memory via the runtime's MemoryHub."""
-        assert self._runtime is not None, "connect() must be called before memory_forget()"
+        if self._runtime is None:
+            raise RuntimeError("Gateway not connected — call connect() before memory_forget()")
 
         return await self._runtime.memory_hub.forget(record_id, agent_name=agent_name)
 
@@ -356,7 +366,8 @@ class InProcessGateway(GatewayProtocol):
 
     async def list_agent_tools(self, agent_name: str) -> list[dict[str, Any]]:
         """Return tool definitions from the agent's spec."""
-        assert self._runtime is not None, "connect() must be called before list_agent_tools()"
+        if self._runtime is None:
+            raise RuntimeError("Gateway not connected — call connect() before list_agent_tools()")
 
         spec = self._runtime.agent_registry.get(agent_name)
         if spec is None:

@@ -1,5 +1,6 @@
 """Corvus TUI main application — chat loop and command dispatch."""
 
+import argparse
 import asyncio
 import json
 import logging
@@ -22,7 +23,7 @@ from corvus.security.audit import AuditLog
 from corvus.security.policy import PolicyEngine
 from corvus.security.tokens import create_break_glass_token
 from corvus.tui.commands.registry import CommandRegistry, InputTier, SlashCommand
-from corvus.tui.core.agent_stack import AgentStack
+from corvus.tui.core.agent_stack import AgentStack, AgentStatus
 from corvus.tui.core.command_router import CommandRouter
 from corvus.tui.core.event_handler import EventHandler
 from corvus.tui.core.exporter import default_export_path, export_session_to_markdown
@@ -34,7 +35,8 @@ from corvus.tui.output.renderer import ChatRenderer
 from corvus.tui.output.status_bar import StatusBar
 from corvus.tui.output.token_counter import TokenCounter
 from corvus.tui.protocol.in_process import InProcessGateway
-from corvus.tui.theme import TuiTheme
+from corvus.tui.protocol.websocket import WebSocketGateway
+from corvus.tui.theme import TuiTheme, available_themes
 
 logger = logging.getLogger("corvus-tui.app")
 
@@ -73,8 +75,10 @@ class TuiApp:
         self._break_glass_expiry: float | None = None
         self._break_glass_secret: bytes = secrets.token_bytes(32)
 
-        # Audit log — initialised from CORVUS_AUDIT_LOG env var or default path
-        audit_path = os.environ.get("CORVUS_AUDIT_LOG", "logs/audit.jsonl")
+        # Audit log — only initialised when CORVUS_AUDIT_LOG is set or logs/ exists
+        audit_path = os.environ.get("CORVUS_AUDIT_LOG", "")
+        if not audit_path and os.path.isdir("logs"):
+            audit_path = "logs/audit.jsonl"
         self._audit_log: AuditLog | None = AuditLog(Path(audit_path)) if audit_path else None
 
         self._register_builtin_commands()
@@ -408,8 +412,6 @@ class TuiApp:
 
     def _handle_theme_command(self, args: str | None) -> None:
         """Handle '/theme [name]' — switch theme or list available themes."""
-        from corvus.tui.theme import TuiTheme, available_themes
-
         if not args or not args.strip():
             themes = available_themes()
             current = self.theme.name
@@ -529,6 +531,18 @@ class TuiApp:
             await self._handle_policy_command()
             return True
 
+        if cmd_name == "workers":
+            self._handle_workers_command()
+            return True
+
+        if cmd_name == "status":
+            await self._handle_status_command()
+            return True
+
+        if cmd_name == "tool-history":
+            self._handle_tool_history_command()
+            return True
+
         self.renderer.render_system(f"/{cmd_name} — not yet implemented")
         return True
 
@@ -542,6 +556,84 @@ class TuiApp:
             self.renderer.render_system("No policy loaded. Place a policy.yaml in config/ and restart.")
             return
         self.renderer.render_policy(self.policy_engine, self.permission_tier)
+
+    # ------------------------------------------------------------------
+    # Workers command
+    # ------------------------------------------------------------------
+
+    def _handle_workers_command(self) -> None:
+        """Handle /workers — list active child/background agents."""
+        if self.agent_stack.depth == 0:
+            self.renderer.render_system("No active agents.")
+            return
+
+        current = self.agent_stack.current
+        children = current.children if current.children else []
+        if not children:
+            self.renderer.render_system(f"@{current.agent_name} has no active workers.")
+            return
+
+        self.renderer.render_system(f"Workers for @{current.agent_name}:")
+        for child in children:
+            status_label = child.status.value if hasattr(child.status, "value") else str(child.status)
+            self.renderer.render_system(f"  @{child.agent_name} [{status_label}]")
+
+    # ------------------------------------------------------------------
+    # Status command
+    # ------------------------------------------------------------------
+
+    async def _handle_status_command(self) -> None:
+        """Handle /status — show system status overview."""
+        lines = []
+
+        # Connection
+        connected = hasattr(self.gateway, '_connected') and self.gateway._connected
+        lines.append(f"Gateway: {'connected' if connected else 'not connected'}")
+
+        # Agents
+        try:
+            agents = await self.gateway.list_agents()
+            lines.append(f"Agents: {len(agents)} available")
+        except Exception:
+            lines.append("Agents: unavailable")
+
+        # Current agent
+        if self.agent_stack.depth > 0:
+            lines.append(f"Current: @{self.agent_stack.current.agent_name}")
+
+        # Tokens
+        lines.append(f"Tokens: {self.token_counter.format_display()}")
+
+        # Permission tier
+        lines.append(f"Permission tier: {self.permission_tier}")
+
+        # Break-glass
+        if self._break_glass_token is not None and self._break_glass_expiry is not None:
+            remaining = max(0, self._break_glass_expiry - time.time())
+            mins = int(remaining // 60)
+            lines.append(f"Break-glass: active ({mins}m remaining)")
+
+        for line in lines:
+            self.renderer.render_system(line)
+
+    # ------------------------------------------------------------------
+    # Tool history command
+    # ------------------------------------------------------------------
+
+    def _handle_tool_history_command(self) -> None:
+        """Handle /tool-history — show recent tool calls from audit log."""
+        if self._audit_log is None:
+            self.renderer.render_error("Audit log not configured — cannot show tool history.")
+            return
+
+        entries = self._audit_log.read_entries()
+        if not entries:
+            self.renderer.render_system("No tool calls recorded.")
+            return
+
+        # Show last 20 entries
+        entry_dicts = [asdict(e) for e in entries[-20:]]
+        self.renderer.render_audit_entries(entry_dicts, title="Tool History")
 
     # ------------------------------------------------------------------
     # Split mode command
@@ -967,6 +1059,18 @@ class TuiApp:
                 self.renderer.render_error(str(exc))
             return
 
+        if cmd_name == "summon":
+            target = parsed.command_args
+            if not target:
+                self.renderer.render_error("Usage: /summon <agent>")
+                return
+            target = target.strip()
+            self.agent_stack.spawn(target, session_id="")
+            self.renderer.render_system(
+                f"Summoned @{target} as coworker of @{self.agent_stack.current.agent_name}"
+            )
+            return
+
         # !tool dispatch — send as a message, agent interprets the ! prefix
         if parsed.kind == "tool_call":
             text = f"!{parsed.tool_name}"
@@ -1030,9 +1134,8 @@ class TuiApp:
 
         # Wire auto-approve for always-allowed tools
         def _auto_approve_confirm(tool_id: str, _action: str) -> None:
-            import asyncio as _asyncio
             try:
-                loop = _asyncio.get_running_loop()
+                loop = asyncio.get_running_loop()
                 loop.create_task(self.gateway.respond_confirm(tool_id, approved=True))
             except RuntimeError:
                 pass
@@ -1057,6 +1160,16 @@ class TuiApp:
 
         try:
             while True:
+                # Check break-glass TTL expiry
+                if (
+                    self._break_glass_expiry is not None
+                    and time.time() > self._break_glass_expiry
+                ):
+                    self._deactivate_breakglass()
+                    self.renderer.render_system(
+                        "Break-glass mode expired — permissions reset to default."
+                    )
+
                 try:
                     prompt = self._build_prompt()
                     raw = await session.prompt_async(prompt, bottom_toolbar=self.status_bar)
@@ -1108,9 +1221,6 @@ class TuiApp:
 
 def main() -> None:
     """Entry point for python -m corvus.tui."""
-    import argparse
-    import os
-
     parser = argparse.ArgumentParser(description="Corvus TUI — terminal chat interface")
     parser.add_argument(
         "--mode",
@@ -1140,7 +1250,6 @@ def main() -> None:
     app = TuiApp()
 
     if args.mode == "websocket":
-        from corvus.tui.protocol.websocket import WebSocketGateway
         app.gateway = WebSocketGateway(url=args.url, token=args.token)
         app.session_manager = TuiSessionManager(app.gateway, app.agent_stack)
 

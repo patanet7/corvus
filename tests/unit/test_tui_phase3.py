@@ -817,8 +817,8 @@ class TestServiceCommandDispatch:
         assert "not yet implemented" not in output
 
     @pytest.mark.asyncio
-    async def test_unimplemented_command_still_works(self) -> None:
-        """Commands not yet wired still show 'not yet implemented'."""
+    async def test_workers_command_dispatches(self) -> None:
+        """The /workers command dispatches to its handler and produces output."""
         app = TuiApp()
         buf = io.StringIO()
         console = Console(file=buf, force_terminal=True, width=120)
@@ -829,7 +829,7 @@ class TestServiceCommandDispatch:
         result = await app._handle_service_command(parsed)
         assert result is True
         output = _output(buf)
-        assert "not yet implemented" in output
+        assert "No active agents" in output or "workers" in output.lower()
 
 
 # ===========================================================================

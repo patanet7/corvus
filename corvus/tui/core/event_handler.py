@@ -13,6 +13,7 @@ from corvus.tui.output.token_counter import TokenCounter
 from corvus.tui.protocol.events import (
     ConfirmRequest,
     DispatchComplete,
+    DispatchPlan,
     ErrorEvent,
     ProtocolEvent,
     RunComplete,
@@ -80,6 +81,8 @@ class EventHandler:
             self._handle_tool_result(event)
         elif isinstance(event, ConfirmRequest):
             self._handle_confirm_request(event)
+        elif isinstance(event, DispatchPlan):
+            self._handle_dispatch_plan(event)
         elif isinstance(event, ErrorEvent):
             self._handle_error(event)
         elif isinstance(event, DispatchComplete):
@@ -174,6 +177,25 @@ class EventHandler:
             params=event.input,
             agent=event.agent,
         )
+
+    def _handle_dispatch_plan(self, event: DispatchPlan) -> None:
+        """Render a system message summarizing the dispatch plan."""
+        task_count = len(event.tasks)
+        agents = []
+        for task in event.tasks:
+            agent = task.get("agent", "")
+            if agent and agent not in agents:
+                agents.append(agent)
+        if agents:
+            agent_list = ", ".join(agents)
+            self._renderer.render_system(
+                f"Dispatch plan: {agent_list} will handle {task_count} "
+                f"task{'s' if task_count != 1 else ''}"
+            )
+        else:
+            self._renderer.render_system(
+                f"Dispatch plan: {task_count} task{'s' if task_count != 1 else ''}"
+            )
 
     def _handle_error(self, event: ErrorEvent) -> None:
         """Render error message."""
