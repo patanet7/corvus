@@ -32,7 +32,7 @@ class TuiApp:
 
     def __init__(self) -> None:
         self.theme = TuiTheme()
-        self.console = Console(force_terminal=True)
+        self.console = Console()
         self.renderer = ChatRenderer(self.console, self.theme)
         self.agent_stack = AgentStack()
         self.command_registry = CommandRegistry()
