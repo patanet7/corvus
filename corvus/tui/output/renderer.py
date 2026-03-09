@@ -8,13 +8,13 @@ from rich.console import Console
 from rich.live import Live
 from rich.markdown import Markdown
 from rich.panel import Panel
-from rich.spinner import Spinner
 from rich.syntax import Syntax
 from rich.table import Table
 from rich.text import Text
 
 from corvus.security.policy import PolicyEngine
 from corvus.security.sanitizer import sanitize_tool_result
+from corvus.tui.output.stream import StreamHandler
 from corvus.tui.theme import TuiTheme
 
 _TOOL_RESULT_MAX = 500
@@ -26,10 +26,7 @@ class ChatRenderer:
     def __init__(self, console: Console, theme: TuiTheme) -> None:
         self._console = console
         self._theme = theme
-        self._live: Live | None = None
-        self._stream_buffer: list[str] = []
-        self._stream_agent: str = ""
-        self._thinking_live: Live | None = None
+        self._stream_handler = StreamHandler(console, theme)
 
     # -- Welcome --
 
@@ -62,80 +59,67 @@ class ChatRenderer:
                 Text(f"  [{tokens:,} tokens]", style=self._theme.muted)
             )
 
+    # -- Backward-compatible properties for streaming internals --
+
+    @property
+    def _live(self) -> Live | None:
+        """Access the underlying Live display (delegation to StreamHandler)."""
+        return self._stream_handler._live
+
+    @_live.setter
+    def _live(self, value: Live | None) -> None:
+        self._stream_handler._live = value
+
+    @property
+    def _stream_buffer(self) -> list[str]:
+        """Access the stream buffer (delegation to StreamHandler)."""
+        return self._stream_handler._stream_buffer
+
+    @_stream_buffer.setter
+    def _stream_buffer(self, value: list[str]) -> None:
+        self._stream_handler._stream_buffer = value
+
+    @property
+    def _stream_agent(self) -> str:
+        """Access the streaming agent name (delegation to StreamHandler)."""
+        return self._stream_handler._stream_agent
+
+    @_stream_agent.setter
+    def _stream_agent(self, value: str) -> None:
+        self._stream_handler._stream_agent = value
+
+    @property
+    def _thinking_live(self) -> Live | None:
+        """Access the thinking spinner Live display (delegation to StreamHandler)."""
+        return self._stream_handler._thinking_live
+
+    @_thinking_live.setter
+    def _thinking_live(self, value: Live | None) -> None:
+        self._stream_handler._thinking_live = value
+
     # -- Thinking spinner --
 
     def render_thinking_start(self, agent: str) -> None:
         """Show a spinner while the agent is thinking."""
-        self._stop_thinking()
-        color = self._theme.agent_color(agent)
-        spinner = Spinner("dots", text=Text(f" @{agent} thinking…", style=f"bold {color}"))
-        self._thinking_live = Live(spinner, console=self._console, transient=True)
-        self._thinking_live.start()
+        self._stream_handler.render_thinking_start(agent)
 
     def _stop_thinking(self) -> None:
         """Stop the thinking spinner if active."""
-        if self._thinking_live is not None:
-            self._thinking_live.stop()
-            self._thinking_live = None
+        self._stream_handler.stop_thinking()
 
     # -- Streaming --
 
-    def _build_stream_panel(self, agent: str, color: str, content: str) -> Panel:
-        """Build a panel for the current streaming state."""
-        return Panel(
-            Markdown(content) if content else Text("…"),
-            title=f"[bold {color}]@{agent}[/]",
-            border_style=color,
-            expand=False,
-        )
-
     def render_stream_start(self, agent: str) -> None:
         """Start a Live streaming panel for agent output."""
-        self._stop_thinking()
-        color = self._theme.agent_color(agent)
-        self._stream_agent = agent
-        self._stream_buffer = []
-        self._live = Live(
-            self._build_stream_panel(agent, color, ""),
-            console=self._console,
-            refresh_per_second=8,
-            transient=True,
-            vertical_overflow="visible",
-        )
-        self._live.start()
+        self._stream_handler.render_stream_start(agent)
 
     def render_stream_chunk(self, chunk: str) -> None:
         """Append a chunk to the streaming buffer and update the Live display."""
-        self._stream_buffer.append(chunk)
-        if self._live is not None:
-            color = self._theme.agent_color(self._stream_agent)
-            content = "".join(self._stream_buffer)
-            self._live.update(self._build_stream_panel(self._stream_agent, color, content))
+        self._stream_handler.render_stream_chunk(chunk)
 
     def render_stream_end(self, tokens: int = 0) -> None:
         """Finish a streamed response — render final panel."""
-        if self._live is not None:
-            self._live.stop()
-            self._live = None
-
-        content = "".join(self._stream_buffer).strip()
-        agent = self._stream_agent
-
-        # Reset state
-        self._stream_buffer = []
-        self._stream_agent = ""
-
-        if not content:
-            return
-
-        color = self._theme.agent_color(agent)
-        header = Text(f"@{agent}: ", style=f"bold {color}")
-        self._console.print(header)
-        self._console.print(Markdown(content))
-        if tokens:
-            self._console.print(
-                Text(f"  [{tokens:,} tokens]", style=self._theme.muted)
-            )
+        self._stream_handler.render_stream_end(tokens)
 
     # -- Tool calls --
 

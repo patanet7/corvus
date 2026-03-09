@@ -111,6 +111,7 @@ class TuiApp:
             SlashCommand(name="focus", description="Focus a pane or agent", tier=InputTier.SYSTEM, args_spec="<target>"),
             SlashCommand(name="split", description="Split the terminal view", tier=InputTier.SYSTEM, args_spec="<direction>"),
             SlashCommand(name="theme", description="Change the TUI theme", tier=InputTier.SYSTEM, args_spec="[name]"),
+            SlashCommand(name="login", description="Authenticate with session token", tier=InputTier.SYSTEM),
         ]
 
         service_commands = [
@@ -330,6 +331,8 @@ class TuiApp:
         """Delegate system-tier commands to SystemCommandHandler."""
         handled = await self._sys_handler.handle(parsed)
 
+        # Note: pending_login is handled in the main loop before parsing
+
         # Check for deferred theme switch
         new_theme = self._sys_handler.pending_theme_switch
         if new_theme is not None:
@@ -514,6 +517,12 @@ class TuiApp:
                     break
 
                 if not raw or not raw.strip():
+                    continue
+
+                # Handle pending login — treat raw input as a session token
+                if self._sys_handler.pending_login:
+                    self._sys_handler.clear_pending_login()
+                    await self._sys_handler.complete_login(raw.strip())
                     continue
 
                 parsed = self.parser.parse(raw)

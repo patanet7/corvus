@@ -18,8 +18,10 @@ import asyncio
 import json
 import logging
 from collections.abc import Callable, Coroutine
+from datetime import datetime
 from typing import Any
 
+import httpx
 import websockets
 import websockets.asyncio.client
 
@@ -89,6 +91,60 @@ class WebSocketGateway(GatewayProtocol):
 
         http_scheme = "https" if scheme == "wss" else "http"
         return f"{http_scheme}://{host}"
+
+    @property
+    def _auth_headers(self) -> dict[str, str]:
+        """Return Authorization header dict when a token is available."""
+        if self._token:
+            return {"Authorization": f"Bearer {self._token}"}
+        return {}
+
+    # -- REST helpers --
+
+    async def _rest_get(self, path: str, params: dict[str, Any] | None = None) -> Any:
+        """Perform an authenticated GET request against the REST API.
+
+        Returns the parsed JSON response, or ``None`` on error.
+        """
+        url = f"{self.base_http_url}{path}"
+        try:
+            async with httpx.AsyncClient(timeout=10.0) as client:
+                resp = await client.get(url, headers=self._auth_headers, params=params)
+                resp.raise_for_status()
+                return resp.json()
+        except (httpx.HTTPError, httpx.InvalidURL, ValueError) as exc:
+            logger.warning("REST GET %s failed: %s", url, exc)
+            return None
+
+    async def _rest_post(self, path: str, body: dict[str, Any]) -> Any:
+        """Perform an authenticated POST request against the REST API.
+
+        Returns the parsed JSON response, or ``None`` on error.
+        """
+        url = f"{self.base_http_url}{path}"
+        try:
+            async with httpx.AsyncClient(timeout=10.0) as client:
+                resp = await client.post(url, headers=self._auth_headers, json=body)
+                resp.raise_for_status()
+                return resp.json()
+        except (httpx.HTTPError, httpx.InvalidURL, ValueError) as exc:
+            logger.warning("REST POST %s failed: %s", url, exc)
+            return None
+
+    async def _rest_delete(self, path: str, params: dict[str, Any] | None = None) -> Any:
+        """Perform an authenticated DELETE request against the REST API.
+
+        Returns the parsed JSON response, or ``None`` on error.
+        """
+        url = f"{self.base_http_url}{path}"
+        try:
+            async with httpx.AsyncClient(timeout=10.0) as client:
+                resp = await client.delete(url, headers=self._auth_headers, params=params)
+                resp.raise_for_status()
+                return resp.json()
+        except (httpx.HTTPError, httpx.InvalidURL, ValueError) as exc:
+            logger.warning("REST DELETE %s failed: %s", url, exc)
+            return None
 
     # -- Connection lifecycle --
 
@@ -197,42 +253,118 @@ class WebSocketGateway(GatewayProtocol):
         return self._cached_agents
 
     async def list_models(self) -> list[dict[str, Any]]:
-        """Return models from the init payload."""
+        """Return models — prefer REST, fall back to cached init payload."""
+        data = await self._rest_get("/api/models")
+        if data is not None and isinstance(data, list):
+            return data
         return self._cached_models
 
-    # -- Session operations (not yet backed by REST) --
+    # -- Session operations (backed by REST) --
 
     async def list_sessions(self) -> list[SessionSummary]:
-        """List sessions. Not yet implemented for WebSocket mode."""
-        return []
+        """List sessions via REST API."""
+        data = await self._rest_get("/api/sessions")
+        if data is None or not isinstance(data, list):
+            return []
+        sessions: list[SessionSummary] = []
+        for item in data:
+            started_at = None
+            if item.get("started_at"):
+                try:
+                    started_at = datetime.fromisoformat(item["started_at"])
+                except (ValueError, TypeError):
+                    pass
+            sessions.append(SessionSummary(
+                session_id=item.get("session_id", ""),
+                agent_name=item.get("agent_name", ""),
+                summary=item.get("summary", ""),
+                started_at=started_at,
+                message_count=item.get("message_count", 0),
+                agents_used=item.get("agents_used", []),
+            ))
+        return sessions
 
     async def resume_session(self, session_id: str) -> SessionDetail:
-        """Resume a session. Not yet implemented for WebSocket mode."""
-        return SessionDetail(session_id=session_id)
+        """Load full session detail via REST API."""
+        data = await self._rest_get(f"/api/sessions/{session_id}")
+        if data is None or not isinstance(data, dict):
+            return SessionDetail(session_id=session_id)
+        started_at = None
+        if data.get("started_at"):
+            try:
+                started_at = datetime.fromisoformat(data["started_at"])
+            except (ValueError, TypeError):
+                pass
+        return SessionDetail(
+            session_id=data.get("session_id", session_id),
+            agent_name=data.get("agent_name", ""),
+            summary=data.get("summary", ""),
+            started_at=started_at,
+            message_count=data.get("message_count", 0),
+            agents_used=data.get("agents_used", []),
+            messages=data.get("messages", []),
+        )
 
-    # -- Memory operations (not yet backed by REST) --
+    # -- Memory operations (backed by REST) --
 
     async def memory_search(self, query: str, agent_name: str, limit: int = 10) -> list[dict[str, Any]]:
-        """Search memories. Not yet implemented for WebSocket mode."""
+        """Search memories via REST API."""
+        data = await self._rest_get(
+            "/api/memory/search",
+            params={"q": query, "agent": agent_name, "limit": limit},
+        )
+        if data is not None and isinstance(data, list):
+            return data
         return []
 
     async def memory_list(self, agent_name: str, limit: int = 20) -> list[dict[str, Any]]:
-        """List memories. Not yet implemented for WebSocket mode."""
+        """List memories via REST API."""
+        data = await self._rest_get(
+            "/api/memory",
+            params={"agent": agent_name, "limit": limit},
+        )
+        if data is not None and isinstance(data, list):
+            return data
         return []
 
     async def memory_save(self, content: str, agent_name: str) -> str:
-        """Save a memory. Not yet implemented for WebSocket mode."""
+        """Save a memory via REST API. Returns the record ID."""
+        data = await self._rest_post(
+            "/api/memory",
+            body={"text": content, "agent": agent_name},
+        )
+        if data is not None and isinstance(data, dict):
+            return data.get("record_id", data.get("id", ""))
         return ""
 
     async def memory_forget(self, record_id: str, agent_name: str) -> bool:
-        """Forget a memory. Not yet implemented for WebSocket mode."""
+        """Soft-delete a memory via REST API."""
+        data = await self._rest_delete(
+            f"/api/memory/{record_id}",
+            params={"agent": agent_name},
+        )
+        if data is not None and isinstance(data, dict):
+            return data.get("deleted", False)
         return False
 
-    # -- Tool queries --
+    # -- Tool queries (backed by REST) --
 
     async def list_agent_tools(self, agent_name: str) -> list[dict[str, Any]]:
-        """List tools for an agent. Not yet implemented for WebSocket mode."""
+        """List tools for an agent via REST API."""
+        data = await self._rest_get(f"/api/agents/{agent_name}/tools")
+        if data is not None and isinstance(data, list):
+            return data
         return []
+
+    # -- Token management --
+
+    def set_token(self, token: str) -> None:
+        """Update the authentication token for subsequent connections.
+
+        This stores the new token but does NOT automatically reconnect.
+        Call disconnect() then connect() to use the new token.
+        """
+        self._token = token
 
     # -- Event registration --
 

@@ -27,6 +27,7 @@ from corvus.tui.output.renderer import ChatRenderer
 from corvus.tui.output.status_bar import StatusBar
 from corvus.tui.output.token_counter import TokenCounter
 from corvus.tui.protocol.base import GatewayProtocol
+from corvus.tui.protocol.websocket import WebSocketGateway
 from corvus.tui.theme import TuiTheme, available_themes
 
 if TYPE_CHECKING:
@@ -71,6 +72,9 @@ class SystemCommandHandler:
         self.theme: TuiTheme | None = None
         self.console = None  # Set by app after construction
 
+        # Login state — pending token entry
+        self._pending_login: bool = False
+
         # Policy engine and break-glass state
         self.policy_engine: PolicyEngine | None = None
         self.permission_tier: str = "default"
@@ -104,6 +108,8 @@ class SystemCommandHandler:
             return await self._handle_breakglass(parsed.command_args)
         if cmd == "models":
             return await self._handle_models()
+        if cmd == "login":
+            return await self._handle_login(parsed.command_args)
         return False
 
     # -- Individual handlers --
@@ -327,6 +333,53 @@ class SystemCommandHandler:
             )
             return True
         return False
+
+    async def _handle_login(self, args: str | None) -> bool:
+        """Handle /login command for WebSocket authentication.
+
+        If the gateway is not a WebSocketGateway, inform the user that login
+        is not needed.  Otherwise, if a token is provided as an argument, use
+        it directly.  If no argument, set a pending flag so the app prompts
+        for token entry on the next input cycle.
+        """
+        if not isinstance(self.gateway, WebSocketGateway):
+            self.renderer.render_system("Login not needed — using in-process gateway")
+            return True
+
+        token = (args or "").strip() if args else ""
+
+        if not token:
+            # No token provided — prompt user and set pending flag
+            self._pending_login = True
+            self.renderer.render_system("Enter session token:")
+            return True
+
+        # Token provided (either via args or pending completion)
+        self.gateway.set_token(token)
+        self.renderer.render_system("Token set. Reconnecting...")
+
+        try:
+            await self.gateway.disconnect()
+            await self.gateway.connect()
+            self.renderer.render_system("Reconnected successfully.")
+        except Exception as exc:
+            self.renderer.render_error(f"Reconnection failed: {exc}")
+
+        return True
+
+    @property
+    def pending_login(self) -> bool:
+        """If True, the app should treat the next input as a login token."""
+        return self._pending_login
+
+    def clear_pending_login(self) -> None:
+        """Clear the pending login flag."""
+        self._pending_login = False
+
+    async def complete_login(self, token: str) -> None:
+        """Complete a pending login with the provided token."""
+        self._pending_login = False
+        await self._handle_login(token)
 
     async def _handle_models(self) -> bool:
         models = await self.gateway.list_models()
