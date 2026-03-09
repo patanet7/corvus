@@ -204,14 +204,24 @@ def cleanup_session_workspaces(*, session_id: str) -> None:
 
 
 def prune_stale_worktrees() -> int:
-    """Prune all stale git worktree references. Returns count removed."""
+    """Prune only genuinely stale git worktree references.
+
+    SAFETY: Only removes worktrees whose directories no longer exist on disk.
+    Never force-removes active worktrees — those belong to running sessions
+    or developer worktrees (e.g. .worktrees/ created by git-worktree skills).
+
+    Previous version had a critical bug: it treated ALL non-main worktrees
+    as stale and force-removed them, destroying active work.
+    """
     source_root = _workspace_source_root()
     git_dir = source_root / ".git"
     if not git_dir.exists() or not shutil.which("git"):
         return 0
 
+    # Only prune orphaned metadata — directories that no longer exist.
+    # This is exactly what `git worktree prune` does safely.
     result = subprocess.run(
-        ["git", "worktree", "list", "--porcelain"],
+        ["git", "worktree", "prune", "--verbose"],
         cwd=str(source_root),
         capture_output=True,
         text=True,
@@ -219,36 +229,8 @@ def prune_stale_worktrees() -> int:
     if result.returncode != 0:
         return 0
 
-    main_worktree = str(source_root)
-    stale_paths = []
-    for line in result.stdout.splitlines():
-        if line.startswith("worktree "):
-            path = line[len("worktree "):]
-            if path != main_worktree:
-                stale_paths.append(path)
-
-    removed = 0
-    for path in stale_paths:
-        res = subprocess.run(
-            ["git", "worktree", "remove", "--force", path],
-            cwd=str(source_root),
-            capture_output=True,
-            text=True,
-        )
-        if res.returncode == 0:
-            removed += 1
-        else:
-            # Directory might already be gone — just needs pruning
-            shutil.rmtree(path, ignore_errors=True)
-            removed += 1
-
-    # Final prune to clean metadata
-    subprocess.run(
-        ["git", "worktree", "prune"],
-        cwd=str(source_root),
-        capture_output=True,
-        text=True,
-    )
+    # Count pruned entries from verbose output
+    removed = sum(1 for line in result.stdout.splitlines() if line.startswith("Removing"))
     if removed:
         logger.info("Pruned %d stale worktrees", removed)
     return removed
