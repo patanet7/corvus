@@ -80,3 +80,7 @@ run = "mkdir -p tests/output && ts=$(date +%Y%m%d-%H%M%S) && cd frontend && pnpm
 [tasks.chat]
 description = "Interactive agent REPL"
 run = "uv run python -m corvus.cli.chat"
+
+[tasks.tui]
+description = "Launch Corvus TUI"
+run = "uv run python -m corvus.tui"
