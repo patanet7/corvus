@@ -134,6 +134,18 @@ LiteLLM handles fallbacks, retries, cooldowns, and cost tracking. `config/models
 - NO LAZY IMPORTS — solve the issue at module level
 - NO RELATIVE IMPORTS
 
+## Documentation System
+
+Ground truths, ADRs, specs, and plans live in `docs/`. The entry point is `docs/ground-truth/index.md`.
+
+**Rules:**
+- Before working on a subsystem, read its ground truth file in `docs/ground-truth/`
+- After completing a spec, extract ground truths before archiving
+- Ground truths are terse and declarative — no code examples (configs/schemas OK)
+- Specs and plans use YAML frontmatter with lifecycle status
+- ARCHITECTURE.md is a topology map only — details live in ground truths
+- ADRs in `docs/adr/` capture why decisions were made — never edit, only supersede
+
 ## Git Remotes
 
 ```bash
