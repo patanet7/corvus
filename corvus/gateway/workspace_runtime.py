@@ -126,6 +126,134 @@ def prepare_agent_workspace(*, session_id: str, agent_name: str) -> Path:
     return workspace_dir
 
 
+def cleanup_agent_workspace(*, session_id: str, agent_name: str) -> None:
+    """Remove a single agent worktree/workspace after a run completes."""
+    safe_session = _sanitize_fragment(session_id, fallback="session")
+    safe_agent = _sanitize_fragment(agent_name, fallback="agent")
+    source_root = _workspace_source_root()
+    workspace_dir = _workspace_root() / safe_session / safe_agent
+
+    # Mirror the fallback logic from prepare_agent_workspace
+    if source_root == workspace_dir or source_root in workspace_dir.parents:
+        fallback_root = source_root.parent / f".{source_root.name}-agent-runs"
+        workspace_dir = fallback_root / safe_session / safe_agent
+
+    if not workspace_dir.exists():
+        return
+
+    git_dir = source_root / ".git"
+    if git_dir.exists() and shutil.which("git"):
+        result = subprocess.run(
+            ["git", "worktree", "remove", "--force", str(workspace_dir)],
+            cwd=str(source_root),
+            capture_output=True,
+            text=True,
+        )
+        if result.returncode == 0:
+            logger.debug("Removed git worktree: %s", workspace_dir)
+        else:
+            # Worktree remove failed — fall back to rmtree
+            logger.warning(
+                "git worktree remove failed for %s (%s); falling back to rmtree",
+                workspace_dir,
+                (result.stderr or "").strip(),
+            )
+            shutil.rmtree(workspace_dir, ignore_errors=True)
+    else:
+        shutil.rmtree(workspace_dir, ignore_errors=True)
+        logger.debug("Removed snapshot workspace: %s", workspace_dir)
+
+    # Clean up empty session directory
+    session_dir = workspace_dir.parent
+    if session_dir.is_dir() and not any(session_dir.iterdir()):
+        session_dir.rmdir()
+        logger.debug("Removed empty session dir: %s", session_dir)
+
+
+def cleanup_session_workspaces(*, session_id: str) -> None:
+    """Remove all agent workspaces for a session."""
+    safe_session = _sanitize_fragment(session_id, fallback="session")
+    source_root = _workspace_source_root()
+    session_dir = _workspace_root() / safe_session
+
+    # Mirror the fallback logic from prepare_agent_workspace
+    if source_root == session_dir or source_root in session_dir.parents:
+        fallback_root = source_root.parent / f".{source_root.name}-agent-runs"
+        session_dir = fallback_root / safe_session
+
+    if not session_dir.is_dir():
+        return
+
+    git_dir = source_root / ".git"
+    use_git = git_dir.exists() and shutil.which("git") is not None
+
+    for agent_dir in list(session_dir.iterdir()):
+        if not agent_dir.is_dir():
+            continue
+        if use_git:
+            subprocess.run(
+                ["git", "worktree", "remove", "--force", str(agent_dir)],
+                cwd=str(source_root),
+                capture_output=True,
+                text=True,
+            )
+        shutil.rmtree(agent_dir, ignore_errors=True)
+
+    shutil.rmtree(session_dir, ignore_errors=True)
+    logger.info("Cleaned up session workspaces: %s", session_dir)
+
+
+def prune_stale_worktrees() -> int:
+    """Prune all stale git worktree references. Returns count removed."""
+    source_root = _workspace_source_root()
+    git_dir = source_root / ".git"
+    if not git_dir.exists() or not shutil.which("git"):
+        return 0
+
+    result = subprocess.run(
+        ["git", "worktree", "list", "--porcelain"],
+        cwd=str(source_root),
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode != 0:
+        return 0
+
+    main_worktree = str(source_root)
+    stale_paths = []
+    for line in result.stdout.splitlines():
+        if line.startswith("worktree "):
+            path = line[len("worktree "):]
+            if path != main_worktree:
+                stale_paths.append(path)
+
+    removed = 0
+    for path in stale_paths:
+        res = subprocess.run(
+            ["git", "worktree", "remove", "--force", path],
+            cwd=str(source_root),
+            capture_output=True,
+            text=True,
+        )
+        if res.returncode == 0:
+            removed += 1
+        else:
+            # Directory might already be gone — just needs pruning
+            shutil.rmtree(path, ignore_errors=True)
+            removed += 1
+
+    # Final prune to clean metadata
+    subprocess.run(
+        ["git", "worktree", "prune"],
+        cwd=str(source_root),
+        capture_output=True,
+        text=True,
+    )
+    if removed:
+        logger.info("Pruned %d stale worktrees", removed)
+    return removed
+
+
 def copy_agent_skills(
     agent_name: str,
     config_dir: Path,

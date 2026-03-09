@@ -1,8 +1,9 @@
 """Tab completion for the Corvus TUI chat input.
 
-Provides completions for three prefix types:
-- ``@`` prefix: agent names
+Provides completions for:
 - ``/`` prefix: slash commands (from CommandRegistry)
+- ``/command <arg>``: contextual argument completions (agent names, etc.)
+- ``@`` prefix: agent names (anywhere in line)
 - ``!`` prefix: tool names
 """
 
@@ -15,9 +16,14 @@ from prompt_toolkit.document import Document
 
 from corvus.tui.commands.registry import CommandRegistry
 
+# Commands whose argument is an agent name.
+_AGENT_ARG_COMMANDS = frozenset({
+    "agent", "enter", "spawn", "summon", "kill", "focus",
+})
+
 
 class ChatCompleter(Completer):
-    """Tab completion for @agents, /commands, and !tools."""
+    """Tab completion for @agents, /commands, /command args, and !tools."""
 
     def __init__(
         self,
@@ -54,6 +60,25 @@ class ChatCompleter(Completer):
                         start_position=-(len(partial)),
                         display_meta="agent",
                     )
+            return
+
+        # /command argument completions — "/agent ho" → complete agent names
+        if text.startswith("/") and " " in text:
+            space_pos = text.index(" ")
+            cmd_name = text[1:space_pos]
+            arg_partial = text[space_pos + 1 :]
+
+            if cmd_name in _AGENT_ARG_COMMANDS:
+                for name in sorted(self._agent_names):
+                    if name.startswith(arg_partial):
+                        yield Completion(
+                            name,
+                            start_position=-(len(arg_partial)),
+                            display_meta="agent",
+                        )
+                return
+
+            # Fall through — no special arg completion for this command
             return
 
         # /command completions — only at the start of the line

@@ -398,10 +398,11 @@ async def execute_agent_run(
                             turn_id=turn.turn_id,
                         )
                 elif isinstance(sdk_message, ResultMessage):
-                    tokens_used = int(getattr(sdk_message, "total_input_tokens", 0)) + int(
-                        getattr(sdk_message, "total_output_tokens", 0),
+                    usage = getattr(sdk_message, "usage", None) or {}
+                    tokens_used = int(usage.get("input_tokens", 0)) + int(
+                        usage.get("output_tokens", 0),
                     )
-                    total_cost = float(getattr(sdk_message, "total_cost_usd", 0.0))
+                    total_cost = float(getattr(sdk_message, "total_cost_usd", 0.0) or 0.0)
                     context_pct = (
                         round((tokens_used / context_limit) * 100, 1)
                         if context_limit > 0

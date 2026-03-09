@@ -27,6 +27,7 @@ class StatusBar:
         self._token_counter = token_counter
         self._theme = theme
         self._model: str = "default"
+        self._tier: str | None = None
 
     @property
     def model(self) -> str:
@@ -37,6 +38,16 @@ class StatusBar:
     def model(self, value: str) -> None:
         """Set the current model name."""
         self._model = value
+
+    @property
+    def tier(self) -> str | None:
+        """Return the current permission tier, or None if not set."""
+        return self._tier
+
+    @tier.setter
+    def tier(self, value: str | None) -> None:
+        """Set the current permission tier."""
+        self._tier = value
 
     def __call__(self) -> HTML:
         """Called by prompt_toolkit to render the toolbar."""
@@ -57,6 +68,10 @@ class StatusBar:
             workers = len(self._agent_stack.current.children)
             if workers:
                 parts.append(f"workers: {workers}" if workers != 1 else "workers: 1")
+
+        # Permission tier
+        if self._tier is not None:
+            parts.append(self._tier)
 
         # Token count
         parts.append(self._token_counter.format_display())

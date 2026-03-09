@@ -108,6 +108,7 @@ def create_hooks(
         # Store context for the post hook to retrieve
         _tool_call_context[tool_use_id] = {
             "call_id": call_id,
+            "tool_name": tool_name,
             "start_time": time.monotonic(),
         }
 
@@ -136,14 +137,21 @@ def create_hooks(
         ctx = _tool_call_context.pop(tool_use_id, None)
         if ctx:
             call_id = ctx["call_id"]
+            ctx_tool_name = ctx.get("tool_name", "")
             duration_ms = int((time.monotonic() - ctx["start_time"]) * 1000)
         else:
             call_id = tool_use_id if tool_use_id else str(_uuid.uuid4())[:8]
+            ctx_tool_name = ""
             duration_ms = 0
 
-        # Extract output from input_data if the SDK provides it;
-        # fall back to a placeholder instead of misleadingly sending the input.
-        tool_output = input_data.get("tool_result", input_data.get("output", None))
+        # Extract output from input_data — SDK may provide it under various keys.
+        tool_output = (
+            input_data.get("tool_response")
+            or input_data.get("tool_result")
+            or input_data.get("output")
+            or input_data.get("result")
+            or input_data.get("content")
+        )
         if tool_output is not None:
             output_str = str(tool_output)[:500]
         else:
@@ -165,6 +173,7 @@ def create_hooks(
             await ws_callback(
                 {
                     "type": "tool_result",
+                    "tool": ctx_tool_name or tool_name,
                     "call_id": call_id,
                     "output": output_str,
                     "duration_ms": duration_ms,

@@ -47,6 +47,7 @@ from corvus.api.webhooks import router as webhooks_router
 from corvus.config import HOST, PORT
 from corvus.gateway.options import any_llm_configured, build_options as build_runtime_options
 from corvus.gateway.runtime import GatewayRuntime, build_runtime, ensure_dirs, init_credentials
+from corvus.gateway.workspace_runtime import prune_stale_worktrees
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("corvus-gateway")
@@ -101,6 +102,14 @@ async def lifespan(_app: FastAPI) -> AsyncGenerator[None]:
     except Exception as exc:
         logger.warning("LiteLLM proxy failed to start, using config-based routing: %s", exc)
     runtime.model_router.discover_models()
+
+    # Prune stale worktrees left from previous sessions
+    try:
+        pruned = prune_stale_worktrees()
+        if pruned:
+            logger.info("Pruned %d stale agent worktrees at startup", pruned)
+    except Exception:
+        logger.warning("Failed to prune stale worktrees at startup", exc_info=True)
 
     await runtime.supervisor.start()
     logger.info("AgentSupervisor heartbeat started")

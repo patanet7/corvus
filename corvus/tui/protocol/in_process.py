@@ -5,17 +5,18 @@ WebSocket transport entirely.  Events are intercepted from the
 SessionEmitter and forwarded to the TUI via the registered callback.
 """
 
-import asyncio
 import json
 import logging
 import uuid
 from collections.abc import Callable, Coroutine
-from datetime import datetime
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
 from corvus.gateway.chat_session import ChatSession
 from corvus.gateway.runtime import GatewayRuntime, build_runtime
+from corvus.gateway.workspace_runtime import cleanup_session_workspaces
+from corvus.memory.record import MemoryRecord
 from corvus.tui.protocol.base import GatewayProtocol, SessionDetail, SessionSummary
 from corvus.tui.protocol.events import ProtocolEvent, parse_event
 
@@ -71,7 +72,14 @@ class InProcessGateway(GatewayProtocol):
         logger.info("In-process gateway connected (full stack)")
 
     async def disconnect(self) -> None:
-        """Tear down the runtime — stop LiteLLM, supervisor, scheduler."""
+        """Tear down the runtime — stop LiteLLM, supervisor, scheduler, cleanup workspaces."""
+        # Clean up session workspaces before tearing down runtime
+        if self._session is not None:
+            try:
+                cleanup_session_workspaces(session_id=self._session.session_id)
+            except Exception:
+                logger.warning("Failed to cleanup workspaces for session %s", self._session.session_id)
+
         if self._runtime is not None:
             try:
                 await self._runtime.litellm_manager.stop()
@@ -94,7 +102,7 @@ class InProcessGateway(GatewayProtocol):
     # Messaging
     # ------------------------------------------------------------------
 
-    async def send_message(self, text: str, *, session_id: str | None = None) -> None:
+    async def send_message(self, text: str, *, session_id: str | None = None, requested_agent: str | None = None) -> None:
         """Send a user message through the in-process gateway.
 
         Creates or reuses a ChatSession with websocket=None.  The emitter's
@@ -130,7 +138,7 @@ class InProcessGateway(GatewayProtocol):
         session.emitter._ws_send_fn = _intercept_ws_send
 
         # Build a dispatch through the session's normal pipeline
-        from corvus.gateway.chat_engine import resolve_chat_dispatch, resolve_default_agent
+        from corvus.gateway.chat_engine import resolve_chat_dispatch
 
         turn_id = str(uuid.uuid4())
         dispatch_id = str(uuid.uuid4())
@@ -140,7 +148,7 @@ class InProcessGateway(GatewayProtocol):
             dispatch_resolution, dispatch_error = await resolve_chat_dispatch(
                 runtime=self._runtime,
                 user_message=text,
-                requested_agent=None,
+                requested_agent=requested_agent,
                 requested_agents=None,
                 requested_model=None,
                 dispatch_mode_raw=None,
@@ -300,6 +308,84 @@ class InProcessGateway(GatewayProtocol):
 
         models = self._runtime.model_router.list_available_models()
         return [m.to_dict() for m in models]
+
+    # ------------------------------------------------------------------
+    # Memory operations
+    # ------------------------------------------------------------------
+
+    async def memory_search(self, query: str, agent_name: str, limit: int = 10) -> list[dict[str, Any]]:
+        """Search memories via the runtime's MemoryHub."""
+        assert self._runtime is not None, "connect() must be called before memory_search()"
+
+        results = await self._runtime.memory_hub.search(
+            query, agent_name=agent_name, limit=limit,
+        )
+        return [r.to_dict() for r in results]
+
+    async def memory_list(self, agent_name: str, limit: int = 20) -> list[dict[str, Any]]:
+        """List recent memories via the runtime's MemoryHub."""
+        assert self._runtime is not None, "connect() must be called before memory_list()"
+
+        results = await self._runtime.memory_hub.list_memories(
+            agent_name=agent_name, limit=limit,
+        )
+        return [r.to_dict() for r in results]
+
+    async def memory_save(self, content: str, agent_name: str) -> str:
+        """Save a new memory via the runtime's MemoryHub."""
+        assert self._runtime is not None, "connect() must be called before memory_save()"
+
+        record = MemoryRecord(
+            id=str(uuid.uuid4()),
+            content=content,
+            domain="shared",
+            source="tui",
+            created_at=datetime.now(UTC).isoformat(),
+        )
+        return await self._runtime.memory_hub.save(record, agent_name=agent_name)
+
+    async def memory_forget(self, record_id: str, agent_name: str) -> bool:
+        """Soft-delete a memory via the runtime's MemoryHub."""
+        assert self._runtime is not None, "connect() must be called before memory_forget()"
+
+        return await self._runtime.memory_hub.forget(record_id, agent_name=agent_name)
+
+    # ------------------------------------------------------------------
+    # Tool queries
+    # ------------------------------------------------------------------
+
+    async def list_agent_tools(self, agent_name: str) -> list[dict[str, Any]]:
+        """Return tool definitions from the agent's spec."""
+        assert self._runtime is not None, "connect() must be called before list_agent_tools()"
+
+        spec = self._runtime.agent_registry.get(agent_name)
+        if spec is None:
+            return []
+
+        tools: list[dict[str, Any]] = []
+        for tool_name in spec.tools.builtin:
+            tools.append({
+                "name": tool_name,
+                "type": "builtin",
+                "description": "",
+            })
+
+        for module_name, module_config in spec.tools.modules.items():
+            tools.append({
+                "name": module_name,
+                "type": "module",
+                "description": str(module_config) if module_config else "",
+            })
+
+        for mcp_server in spec.tools.mcp_servers:
+            server_name = mcp_server.get("name", "unknown")
+            tools.append({
+                "name": server_name,
+                "type": "mcp",
+                "description": mcp_server.get("description", ""),
+            })
+
+        return tools
 
     # ------------------------------------------------------------------
     # Event callback

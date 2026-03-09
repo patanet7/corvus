@@ -56,7 +56,13 @@ class GatewayProtocol(ABC):
         """Cleanly disconnect from the gateway."""
 
     @abstractmethod
-    async def send_message(self, text: str, *, session_id: str | None = None) -> None:
+    async def send_message(
+        self,
+        text: str,
+        *,
+        session_id: str | None = None,
+        requested_agent: str | None = None,
+    ) -> None:
         """Send a user message to the gateway.
 
         Parameters
@@ -66,6 +72,9 @@ class GatewayProtocol(ABC):
         session_id:
             Optional session to send into.  If ``None`` the gateway creates
             or resumes a default session.
+        requested_agent:
+            If set, bypass router classification and send directly to this
+            agent.  ``None`` lets the router decide.
         """
 
     @abstractmethod
@@ -99,6 +108,34 @@ class GatewayProtocol(ABC):
     @abstractmethod
     async def list_models(self) -> list[dict[str, Any]]:
         """Return metadata for all available models."""
+
+    # ------------------------------------------------------------------
+    # Memory operations
+    # ------------------------------------------------------------------
+
+    @abstractmethod
+    async def memory_search(self, query: str, agent_name: str, limit: int = 10) -> list[dict[str, Any]]:
+        """Search memories by query for the given agent."""
+
+    @abstractmethod
+    async def memory_list(self, agent_name: str, limit: int = 20) -> list[dict[str, Any]]:
+        """List recent memories for the given agent."""
+
+    @abstractmethod
+    async def memory_save(self, content: str, agent_name: str) -> str:
+        """Save a new memory. Returns the record ID."""
+
+    @abstractmethod
+    async def memory_forget(self, record_id: str, agent_name: str) -> bool:
+        """Soft-delete a memory by ID. Returns True if deleted."""
+
+    # ------------------------------------------------------------------
+    # Tool queries
+    # ------------------------------------------------------------------
+
+    @abstractmethod
+    async def list_agent_tools(self, agent_name: str) -> list[dict[str, Any]]:
+        """Return tool definitions for a specific agent."""
 
     @abstractmethod
     def on_event(

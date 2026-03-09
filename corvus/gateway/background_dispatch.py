@@ -20,7 +20,7 @@ from corvus.gateway.dispatch_runtime import execute_dispatch_runs
 from corvus.gateway.options import build_backend_options, resolve_backend_and_model, ui_model_id
 from corvus.gateway.runtime import GatewayRuntime
 from corvus.gateway.task_planner import TaskRoute
-from corvus.gateway.workspace_runtime import prepare_agent_workspace
+from corvus.gateway.workspace_runtime import cleanup_session_workspaces, prepare_agent_workspace
 
 logger = logging.getLogger("corvus-gateway")
 
@@ -377,10 +377,11 @@ async def execute_planned_background_dispatch(
                             )
                             chunk_index += 1
                     elif isinstance(sdk_message, ResultMessage):
-                        tokens_used = int(getattr(sdk_message, "total_input_tokens", 0)) + int(
-                            getattr(sdk_message, "total_output_tokens", 0)
+                        usage = getattr(sdk_message, "usage", None) or {}
+                        tokens_used = int(usage.get("input_tokens", 0)) + int(
+                            usage.get("output_tokens", 0),
                         )
-                        total_cost = float(getattr(sdk_message, "total_cost_usd", 0.0))
+                        total_cost = float(getattr(sdk_message, "total_cost_usd", 0.0) or 0.0)
 
             assistant_text = " ".join(response_parts).strip()
             if assistant_text:
@@ -511,6 +512,11 @@ async def execute_planned_background_dispatch(
             message_count=max(1, len(run_results) + 1),
             agents_used=[route.agent for route in run_requests],
         )
+
+        try:
+            cleanup_session_workspaces(session_id=session_id)
+        except Exception:
+            logger.warning("Failed to cleanup workspaces for session %s", session_id)
 
         await runtime.emitter.emit(
             "dispatch_completed",

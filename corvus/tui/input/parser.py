@@ -78,6 +78,15 @@ class InputParser:
             if known_matches:
                 # Strip all @mentions from the front to get the remaining text
                 remainder = _MENTION_RE.sub("", text).strip()
+                # Bare @agent with no text → treat as /agent switch command
+                if not remainder:
+                    return ParsedInput(
+                        raw=raw,
+                        kind="command",
+                        text=text,
+                        command="agent",
+                        command_args=known_matches[0],
+                    )
                 return ParsedInput(
                     raw=raw,
                     kind="mention",

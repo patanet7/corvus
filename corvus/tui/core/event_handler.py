@@ -4,6 +4,9 @@ Maps incoming ProtocolEvent objects to renderer calls and agent stack
 state transitions. Tracks streaming state and pending confirmations.
 """
 
+from collections.abc import Callable
+
+from corvus.security.sanitizer import sanitize_tool_result
 from corvus.tui.core.agent_stack import AgentStack, AgentStatus
 from corvus.tui.output.renderer import ChatRenderer
 from corvus.tui.output.token_counter import TokenCounter
@@ -42,6 +45,9 @@ class EventHandler:
         self._token_counter = token_counter
         self._pending_confirm: ConfirmRequest | None = None
         self._streaming_agent: str | None = None
+        self._tool_names: dict[str, str] = {}  # tool_id → tool_name
+        self._auto_approve_check: Callable[[str], bool] | None = None
+        self._auto_approve_confirm: Callable[[str, str], None] | None = None
 
     @property
     def pending_confirm(self) -> ConfirmRequest | None:
@@ -80,11 +86,11 @@ class EventHandler:
             self._handle_dispatch_complete(event)
 
     def _handle_run_start(self, event: RunStart) -> None:
-        """Set agent to THINKING and render a system message."""
+        """Set agent to THINKING and start the thinking spinner."""
         ctx = self._agent_stack.find(event.agent)
         if ctx is not None:
             ctx.status = AgentStatus.THINKING
-        self._renderer.render_system(f"{event.agent} is thinking...")
+        self._renderer.render_thinking_start(event.agent)
 
     def _handle_run_phase(self, event: RunPhase) -> None:
         """Update agent status based on phase string."""
@@ -119,16 +125,48 @@ class EventHandler:
     def _handle_tool_start(self, event: ToolStart) -> None:
         """End any stream and render tool start panel."""
         self._end_stream()
+        if event.tool_id and event.tool:
+            self._tool_names[event.tool_id] = event.tool
         self._renderer.render_tool_start(event.tool, event.input, event.agent)
 
     def _handle_tool_result(self, event: ToolResult) -> None:
-        """Render tool result panel."""
+        """Render tool result panel, recovering tool name from start event if needed.
+
+        The output is sanitized to scrub credential patterns before display.
+        """
+        tool_name = event.tool or self._tool_names.pop(event.tool_id, "")
         output_str = str(event.output) if event.output is not None else ""
-        self._renderer.render_tool_result(event.tool, output_str, event.agent)
+        sanitized = sanitize_tool_result(output_str)
+        self._renderer.render_tool_result(tool_name, sanitized, event.agent)
+
+    def set_auto_approve(
+        self,
+        check_fn: Callable[[str], bool],
+        confirm_fn: Callable[[str, str], None],
+    ) -> None:
+        """Set callbacks for auto-approval of tool confirmations.
+
+        Parameters
+        ----------
+        check_fn:
+            Called with tool_name, returns True if the tool is always-allowed.
+        confirm_fn:
+            Called with (tool_id, approved=True) to auto-approve without
+            user interaction. Takes tool_id and a literal "approve" string.
+        """
+        self._auto_approve_check = check_fn
+        self._auto_approve_confirm = confirm_fn
 
     def _handle_confirm_request(self, event: ConfirmRequest) -> None:
-        """End stream, store pending confirm, render prompt."""
+        """End stream, check auto-approve, then store pending confirm and render prompt."""
         self._end_stream()
+
+        # Auto-approve if tool is in always-allow set
+        if self._auto_approve_check is not None and self._auto_approve_check(event.tool):
+            if self._auto_approve_confirm is not None:
+                self._auto_approve_confirm(event.tool_id, "approve")
+            return
+
         self._pending_confirm = event
         self._renderer.render_confirm_prompt(
             confirm_id=event.tool_id,

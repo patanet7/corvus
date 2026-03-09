@@ -210,11 +210,23 @@ _EVENT_TYPE_MAP: dict[str, type[ProtocolEvent]] = {
 }
 
 
+# Server-emitted field names that differ from TUI dataclass field names.
+# Maps (event_type, server_field) → dataclass_field.
+_FIELD_ALIASES: dict[tuple[str, str], str] = {
+    ("tool_start", "call_id"): "tool_id",
+    ("tool_start", "params"): "input",
+    ("tool_result", "call_id"): "tool_id",
+    ("tool_result", "tool_call_id"): "tool_id",
+    ("tool_result", "content"): "output",
+}
+
+
 def parse_event(raw: dict) -> ProtocolEvent:
     """Parse a raw WebSocket dict into a typed ProtocolEvent subclass.
 
     Unknown event types return a base ``ProtocolEvent`` so the caller never
-    has to handle ``None``.
+    has to handle ``None``.  Server-side field names that differ from the
+    TUI dataclass fields are normalized via ``_FIELD_ALIASES``.
     """
     event_type = raw.get("type", "")
     cls = _EVENT_TYPE_MAP.get(event_type, ProtocolEvent)
@@ -223,7 +235,9 @@ def parse_event(raw: dict) -> ProtocolEvent:
     cls_fields = {f.name for f in cls.__dataclass_fields__.values()}
     kwargs: dict[str, Any] = {"type": event_type, "raw": raw}
     for key, value in raw.items():
-        if key in cls_fields and key not in ("type", "raw"):
-            kwargs[key] = value
+        # Normalize aliased field names
+        mapped_key = _FIELD_ALIASES.get((event_type, key), key)
+        if mapped_key in cls_fields and mapped_key not in ("type", "raw"):
+            kwargs[mapped_key] = value
 
     return cls(**kwargs)

@@ -23,6 +23,7 @@ from fastapi import APIRouter, HTTPException, Request, WebSocket, WebSocketDisco
 from corvus.config import ALLOWED_USERS
 from corvus.gateway.chat_session import ChatSession
 from corvus.gateway.runtime import GatewayRuntime
+from corvus.gateway.workspace_runtime import cleanup_session_workspaces
 from corvus.security.session_auth import SessionAuthManager
 from corvus.session import extract_session_memories
 
@@ -174,6 +175,11 @@ async def websocket_chat(websocket: WebSocket):
             )
         except Exception:
             logger.exception("Failed to end session %s", session_id)
+
+        try:
+            cleanup_session_workspaces(session_id=session_id)
+        except Exception:
+            logger.warning("Failed to cleanup workspaces for session %s", session_id)
 
         try:
             memories = await extract_session_memories(
