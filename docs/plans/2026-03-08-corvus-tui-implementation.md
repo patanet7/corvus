@@ -2376,37 +2376,81 @@ Phase 5 delivers: WebSocket gateway, split mode, themes, breakglass, export, dom
 
 ---
 
-### Task 5.1: WebSocket Gateway Protocol
+### Task 5.1: WebSocket Gateway Protocol + Authentication
 
 Implement `corvus/tui/protocol/websocket.py`. Connects to `ws://localhost:8000/ws`. Same `GatewayProtocol` interface as in-process. Add `--mode inprocess|websocket` CLI flag.
 
+**Security integration:** WebSocket mode requires authentication. No more localhost auto-auth.
+- Obtain session token from `CORVUS_SESSION_SECRET` env var or `/login` command
+- Send token as `?token=` query param on WebSocket connect
+- Use `SessionAuthManager.create_session_token()` for token generation
+- Handle `AuthResult.authenticated=False` with clear error messages
+
 ---
 
-### Task 5.2: Split Mode
+### Task 5.2: Permission Tier + Policy Display
+
+Wire `PolicyEngine` into the TUI:
+- Status bar shows current permission tier: `strict`, `default`, or `break_glass`
+- `/policy` command (SERVICE tier) shows active deny patterns, confirm gates, and tier config
+- Confirm/deny prompts show tier context — in break-glass, default is "allow"
+- Rate limit denials render distinctly with `retry_after_seconds` countdown
+
+---
+
+### Task 5.3: Break-Glass Mode (Full Security Flow)
+
+`/breakglass` is a security-critical flow:
+1. Verify user is authenticated
+2. Call `create_break_glass_token(secret, agent, session, ttl)` from `corvus.security.tokens`
+3. TTL clamped to `policy.tiers["break_glass"].max_ttl` (4h)
+4. Status bar shows `BREAK-GLASS [47m remaining]` with live countdown (red styling)
+5. `SessionTimeoutTracker` auto-deactivates after 30min idle
+6. `/breakglass off` manually deactivates
+7. Global deny (`*.env*`, `*.key*`, etc.) STILL enforced — break-glass is not god mode
+
+---
+
+### Task 5.4: Audit Log Visibility
+
+Expose the JSONL audit trail in the TUI:
+- `/audit` — show recent audit entries (Rich table: timestamp, agent, tool, outcome, duration)
+- `/audit <agent>` — filter by agent
+- `/audit denied` — show only denied tool calls
+- Tool call results in chat show audit outcome indicator (allowed/denied/rate-limited)
+- Uses `AuditLog.read_entries()` from `corvus.security.audit`
+
+---
+
+### Task 5.5: Tool Result Sanitization
+
+Ensure all tool results displayed in the TUI pass through `sanitize_tool_result()`:
+- `ChatRenderer.render_tool_result()` calls sanitizer before display
+- `EventHandler` sanitizes `ToolResult.result` on receipt
+- Covers: JWT tokens, API keys, Bearer tokens, AWS keys, connection strings, hex secrets
+- Verify with test: inject a fake tool result containing `sk-abc123...` and confirm it renders as `[REDACTED_API_KEY]`
+
+---
+
+### Task 5.6: Split Mode
 
 `/split` toggles side-by-side agent panes. Use prompt_toolkit's `HSplit`/`VSplit` layout containers. Route messages to the left or right pane based on agent.
 
 ---
 
-### Task 5.3: Theme System
+### Task 5.7: Theme System
 
 `/theme <name>` switches between `default`, `light`, `minimal`. Persist selection to `~/.config/corvus/tui.yaml`.
 
 ---
 
-### Task 5.4: Break-Glass Mode
-
-`/breakglass` — elevates permissions for current session. Calls `GatewayRuntime.break_glass.create_session()`. Visual indicator in status bar (red border).
-
----
-
-### Task 5.5: Domain Slash Commands
+### Task 5.8: Domain Slash Commands
 
 Load per-agent slash commands from `agent.yaml` `metadata.tui_commands` section. Register dynamically when agent is switched. Unregister when switching away.
 
 ---
 
-### Task 5.6: Export + Polish
+### Task 5.9: Export + Polish
 
 `/export` — dump current session to markdown file. Add `--session` CLI flag to resume directly. Man page / `--help` for all CLI flags. Final pass on visual consistency.
 

@@ -619,6 +619,63 @@ description = "Start Corvus TUI"
 
 ---
 
+## Security Integration
+
+The TUI must respect the `corvus/security/` architecture. No shortcuts.
+
+### Authentication
+
+- **No localhost auto-auth.** `SessionAuthManager` requires HMAC-SHA256 session tokens or trusted proxy headers.
+- **InProcessGateway (v1):** Bypasses WebSocket auth — runs in-process, no token needed.
+- **WebSocketGateway (v2):** Must obtain a session token (from `CORVUS_SESSION_SECRET` env or interactive login) and send it as a query param or Authorization header.
+- Add `/login` command for token-based auth when using WebSocket mode.
+
+### Permission Tiers
+
+- TUI displays the current permission tier in the status bar: `strict`, `default`, or `break_glass`.
+- Confirm/deny prompts should show tier context — in break-glass mode, default is "allow."
+- `PolicyEngine.compose_deny_list()` determines what tools are denied per tier.
+
+### Break-Glass Mode
+
+`/breakglass` is NOT a simple flag toggle:
+1. Requires authenticated user
+2. Creates session-bound HMAC token via `create_break_glass_token()`
+3. Token has TTL (default 1h, max 4h from `config/policy.yaml`)
+4. Status bar shows `BREAK-GLASS [47m remaining]` with countdown
+5. Auto-deactivates after 30min idle via `SessionTimeoutTracker`
+6. Global deny list (`*.env*`, `*.key`, etc.) STILL applies — break-glass is not god mode
+
+### Tool Call Security Pipeline
+
+Every tool call flows through:
+```
+1. ToolContext.permissions.is_denied(tool_name)  → PolicyEngine deny list
+2. SlidingWindowRateLimiter.check()              → 10 mutations/min, 60 reads/min
+3. ToolContext.permissions.is_confirm_gated()     → requires user approval
+4. MCPToolDef.execute(ctx, **params)             → only declared credentials injected
+5. sanitize_tool_result(output)                  → scrub secrets before display
+6. AuditLog.log_tool_call()                      → JSONL audit trail
+```
+
+The TUI must:
+- Render rate limit denials with `retry_after_seconds`
+- Never display unsanitized tool results
+- Show audit trail via `/audit` command
+
+### New Commands (Security)
+
+| Command | Tier | Description |
+|---------|------|-------------|
+| `/breakglass` | SYSTEM | Activate break-glass mode with TTL |
+| `/breakglass off` | SYSTEM | Deactivate break-glass |
+| `/audit` | SERVICE | Show recent audit log entries |
+| `/audit <agent>` | SERVICE | Filter audit by agent |
+| `/policy` | SERVICE | Show current permission tier and deny patterns |
+| `/login` | SYSTEM | Authenticate for WebSocket mode |
+
+---
+
 ## Key Design Principles
 
 1. **DRY** — one `AgentStack`, one `CommandRouter`, one `GatewayProtocol`. No duplication.
@@ -627,5 +684,6 @@ description = "Start Corvus TUI"
 4. **Protocol-first** — TUI speaks the same protocol as the frontend. Build once, render twice.
 5. **Tiered dispatch** — system commands never burn tokens. Service queries never need an agent.
 6. **Swappable backend** — in-process for dev, WebSocket for production. Same interface.
-7. **No lazy imports** — all dependencies resolved at module load.
-8. **No mocks in tests** — test with real prompt_toolkit apps, real Rich output, real sessions.
+7. **Security-first** — all tool calls go through PolicyEngine + RateLimiter + Sanitizer. No bypass.
+8. **No lazy imports** — all dependencies resolved at module load.
+9. **No mocks in tests** — test with real prompt_toolkit apps, real Rich output, real sessions.
