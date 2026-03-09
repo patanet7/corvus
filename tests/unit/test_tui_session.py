@@ -373,3 +373,51 @@ class TestMultipleOperations:
     @pytest.mark.asyncio()
     async def test_initial_state_is_none(self, manager: TuiSessionManager) -> None:
         assert manager.current_session_id is None
+
+
+class TestSearch:
+    """Tests for TuiSessionManager.search()."""
+
+    @pytest.mark.asyncio()
+    async def test_search_matching_summary(self, manager: TuiSessionManager) -> None:
+        """Search by a word in the summary returns the matching session."""
+        results = await manager.search("deploy")
+        assert len(results) == 1
+        assert results[0].session_id == _CANNED_SESSIONS[0].session_id
+        assert "deploy" in results[0].summary.lower()
+
+    @pytest.mark.asyncio()
+    async def test_search_no_match_returns_empty(self, manager: TuiSessionManager) -> None:
+        """Search for a term that matches nothing returns an empty list."""
+        results = await manager.search("nonexistent-query-xyz")
+        assert results == []
+
+    @pytest.mark.asyncio()
+    async def test_search_is_case_insensitive(self, manager: TuiSessionManager) -> None:
+        """Search should be case-insensitive for both summary and agent_name."""
+        # "Fixed" appears with capital F in the canned data
+        results_lower = await manager.search("fixed")
+        results_upper = await manager.search("FIXED")
+        results_mixed = await manager.search("FiXeD")
+        assert len(results_lower) == 1
+        assert len(results_upper) == 1
+        assert len(results_mixed) == 1
+        assert results_lower[0].session_id == results_upper[0].session_id == results_mixed[0].session_id
+
+    @pytest.mark.asyncio()
+    async def test_search_by_agent_name(self, manager: TuiSessionManager) -> None:
+        """Search by agent_name returns sessions for that agent."""
+        results = await manager.search("homelab")
+        assert len(results) == 1
+        assert results[0].agent_name == "homelab"
+        assert results[0].session_id == _CANNED_SESSIONS[1].session_id
+
+    @pytest.mark.asyncio()
+    async def test_search_matches_multiple_sessions(self, manager: TuiSessionManager) -> None:
+        """A broad query can match multiple sessions."""
+        # All three canned sessions have agent_name containing lowercase letters;
+        # search for a substring common in summaries
+        results = await manager.search("the")
+        # "Fixed the deploy pipeline" and "Reconciled March transactions" — only first has "the"
+        matching_ids = {r.session_id for r in results}
+        assert _CANNED_SESSIONS[0].session_id in matching_ids  # "Fixed the deploy pipeline"

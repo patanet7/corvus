@@ -136,7 +136,7 @@ class InProcessGateway(GatewayProtocol):
                 event = parse_event(payload)
                 await callback(event)
 
-        session.emitter._ws_send_fn = _intercept_ws_send
+        session.set_ws_interceptor(_intercept_ws_send)
 
         # Build a dispatch through the session's normal pipeline
         from corvus.gateway.chat_engine import resolve_chat_dispatch
@@ -180,7 +180,7 @@ class InProcessGateway(GatewayProtocol):
         if dispatch_resolution is None:
             raise RuntimeError("Dispatch resolution returned None without an error — this should not happen")
         try:
-            await session._execute_dispatch_lifecycle(
+            await session.execute_dispatch(
                 dispatch_id=dispatch_id,
                 turn_id=turn_id,
                 resolution=dispatch_resolution,
@@ -209,8 +209,8 @@ class InProcessGateway(GatewayProtocol):
 
     async def cancel_run(self, run_id: str) -> None:
         """Set the dispatch_interrupted flag on the current turn."""
-        if self._session is not None and self._session._current_turn is not None:
-            self._session._current_turn.dispatch_interrupted.set()
+        if self._session is not None:
+            self._session.interrupt_current_turn()
 
     # ------------------------------------------------------------------
     # Session queries

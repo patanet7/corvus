@@ -174,3 +174,47 @@ class TestStatusBarIntegration:
         bar, _stack, _counter = _make_status_bar()
         result = bar()
         assert " | " in result.value
+
+
+class TestStatusBarCostDisplay:
+    """Cost display in the status bar — Task #19."""
+
+    def test_no_cost_shows_tokens_only(self) -> None:
+        bar, _stack, counter = _make_status_bar()
+        counter.add("work", 5000)
+        result = bar()
+        assert "5.0k tok" in result.value
+        assert "$" not in result.value
+
+    def test_cost_shown_after_add_cost(self) -> None:
+        bar, _stack, counter = _make_status_bar()
+        counter.add("work", 5000)
+        counter.add_cost("work", 0.22)
+        result = bar()
+        assert "5.0k tok" in result.value
+        assert "$0.22" in result.value
+
+    def test_cost_updates_dynamically(self) -> None:
+        bar, _stack, counter = _make_status_bar()
+        counter.add("work", 1000)
+        assert "$" not in bar().value
+
+        counter.add_cost("work", 0.05)
+        assert "$0.05" in bar().value
+
+        counter.add_cost("finance", 0.10)
+        assert "$0.15" in bar().value
+
+    def test_cost_with_full_state(self) -> None:
+        bar, stack, counter = _make_status_bar()
+        bar.model = "claude-sonnet"
+        stack.push("homelab", session_id="s1")
+        counter.add("homelab", 12300)
+        counter.add_cost("homelab", 1.05)
+
+        result = bar()
+        text = result.value
+        assert "@homelab" in text
+        assert "claude-sonnet" in text
+        assert "12.3k tok" in text
+        assert "$1.05" in text

@@ -16,6 +16,7 @@ from corvus.tui.protocol.events import (
     DispatchPlan,
     ErrorEvent,
     ProtocolEvent,
+    RateLimitEvent,
     RunComplete,
     RunOutputChunk,
     RunPhase,
@@ -83,6 +84,8 @@ class EventHandler:
             self._handle_confirm_request(event)
         elif isinstance(event, DispatchPlan):
             self._handle_dispatch_plan(event)
+        elif isinstance(event, RateLimitEvent):
+            self._handle_rate_limit(event)
         elif isinstance(event, ErrorEvent):
             self._handle_error(event)
         elif isinstance(event, DispatchComplete):
@@ -116,7 +119,7 @@ class EventHandler:
         self._renderer.render_stream_chunk(event.content)
 
     def _handle_run_complete(self, event: RunComplete) -> None:
-        """End stream, set agent IDLE, accumulate tokens."""
+        """End stream, set agent IDLE, accumulate tokens and cost."""
         self._end_stream()
         ctx = self._agent_stack.find(event.agent)
         if ctx is not None:
@@ -124,6 +127,8 @@ class EventHandler:
             ctx.token_count += event.tokens_used
         if self._token_counter is not None:
             self._token_counter.add(event.agent, event.tokens_used)
+            if event.cost_usd:
+                self._token_counter.add_cost(event.agent, event.cost_usd)
 
     def _handle_tool_start(self, event: ToolStart) -> None:
         """End any stream and render tool start panel."""
@@ -177,6 +182,16 @@ class EventHandler:
             params=event.input,
             agent=event.agent,
         )
+
+    def _handle_rate_limit(self, event: RateLimitEvent) -> None:
+        """Render a rate-limit warning with retry delay."""
+        self._end_stream()
+        retry = event.retry_after_seconds
+        if retry > 0:
+            msg = f"Rate limited — retry in {retry:.0f}s"
+        else:
+            msg = event.message or "Rate limited"
+        self._renderer.render_error(msg)
 
     def _handle_dispatch_plan(self, event: DispatchPlan) -> None:
         """Render a system message summarizing the dispatch plan."""

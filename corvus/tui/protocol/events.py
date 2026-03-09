@@ -175,6 +175,22 @@ class ConfirmResponse(ProtocolEvent):
 
 
 # ---------------------------------------------------------------------------
+# Rate limit
+# ---------------------------------------------------------------------------
+
+@dataclass(slots=True)
+class RateLimitEvent(ProtocolEvent):
+    """The gateway or upstream provider rate-limited a request."""
+
+    message: str = ""
+    retry_after_seconds: float = 0.0
+    agent: str = ""
+    run_id: str = ""
+    dispatch_id: str = ""
+    session_id: str = ""
+
+
+# ---------------------------------------------------------------------------
 # Error
 # ---------------------------------------------------------------------------
 
@@ -206,6 +222,7 @@ _EVENT_TYPE_MAP: dict[str, type[ProtocolEvent]] = {
     "tool_result": ToolResult,
     "confirm_request": ConfirmRequest,
     "confirm_response": ConfirmResponse,
+    "rate_limit": RateLimitEvent,
     "error": ErrorEvent,
 }
 

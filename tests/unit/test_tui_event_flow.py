@@ -15,6 +15,7 @@ from corvus.tui.core.event_handler import EventHandler
 from corvus.tui.output.renderer import ChatRenderer
 from corvus.tui.output.token_counter import TokenCounter
 from corvus.tui.protocol.events import (
+    RateLimitEvent,
     ToolResult,
     ToolStart,
     parse_event,
@@ -712,3 +713,184 @@ class TestHelpAndAgentsListRendering:
         assert "@finance" in output
         assert "@huginn" in output
         assert "●" in output  # current agent marker
+
+
+# ===========================================================================
+# 11. Rate limit event parsing — Task #18
+# ===========================================================================
+
+class TestRateLimitEventParsing:
+    """parse_event maps rate_limit payloads to RateLimitEvent."""
+
+    def test_rate_limit_parsed_to_correct_type(self) -> None:
+        raw = {
+            "type": "rate_limit",
+            "message": "Too many requests",
+            "retry_after_seconds": 30,
+        }
+        event = parse_event(raw)
+        assert isinstance(event, RateLimitEvent)
+
+    def test_rate_limit_fields_populated(self) -> None:
+        raw = {
+            "type": "rate_limit",
+            "message": "Too many requests",
+            "retry_after_seconds": 45.5,
+            "agent": "work",
+        }
+        event = parse_event(raw)
+        assert isinstance(event, RateLimitEvent)
+        assert event.message == "Too many requests"
+        assert event.retry_after_seconds == 45.5
+        assert event.agent == "work"
+
+    def test_rate_limit_defaults(self) -> None:
+        raw = {"type": "rate_limit"}
+        event = parse_event(raw)
+        assert isinstance(event, RateLimitEvent)
+        assert event.message == ""
+        assert event.retry_after_seconds == 0.0
+
+    def test_rate_limit_preserves_raw(self) -> None:
+        raw = {"type": "rate_limit", "retry_after_seconds": 10}
+        event = parse_event(raw)
+        assert event.raw == raw
+
+
+# ===========================================================================
+# 12. Rate limit event handling — Task #18
+# ===========================================================================
+
+class TestRateLimitEventHandling:
+    """EventHandler renders rate limit events as error messages."""
+
+    @pytest.mark.asyncio
+    async def test_rate_limit_renders_retry_message(self) -> None:
+        handler, stack, buf, _ = _make_stack_renderer()
+
+        await handler.handle(parse_event({
+            "type": "rate_limit",
+            "message": "Too many requests",
+            "retry_after_seconds": 30,
+        }))
+        output = _output(buf)
+
+        assert "Rate limited" in output
+        assert "30s" in output
+
+    @pytest.mark.asyncio
+    async def test_rate_limit_zero_retry_uses_message(self) -> None:
+        handler, stack, buf, _ = _make_stack_renderer()
+
+        await handler.handle(parse_event({
+            "type": "rate_limit",
+            "message": "Slow down please",
+            "retry_after_seconds": 0,
+        }))
+        output = _output(buf)
+
+        assert "Slow down please" in output
+
+    @pytest.mark.asyncio
+    async def test_rate_limit_no_message_no_retry_fallback(self) -> None:
+        handler, stack, buf, _ = _make_stack_renderer()
+
+        await handler.handle(parse_event({
+            "type": "rate_limit",
+        }))
+        output = _output(buf)
+
+        assert "Rate limited" in output
+
+    @pytest.mark.asyncio
+    async def test_rate_limit_ends_active_stream(self) -> None:
+        handler, stack, buf, _ = _make_stack_renderer()
+
+        # Start a stream
+        await handler.handle(parse_event({
+            "type": "run_output_chunk",
+            "agent": "work",
+            "content": "Hello",
+        }))
+        assert handler._renderer._live is not None
+
+        # Rate limit should end the stream
+        await handler.handle(parse_event({
+            "type": "rate_limit",
+            "retry_after_seconds": 15,
+        }))
+        assert handler._renderer._live is None
+
+
+# ===========================================================================
+# 13. Cost tracking through events — Task #19
+# ===========================================================================
+
+class TestCostTrackingThroughEvents:
+    """run_complete events with cost_usd accumulate cost in the counter."""
+
+    @pytest.mark.asyncio
+    async def test_cost_accumulated_from_run_complete(self) -> None:
+        handler, stack, buf, counter = _make_stack_renderer()
+
+        await handler.handle(parse_event({
+            "type": "run_complete",
+            "agent": "work",
+            "tokens_used": 500,
+            "cost_usd": 0.05,
+        }))
+        await handler.handle(parse_event({
+            "type": "run_complete",
+            "agent": "work",
+            "tokens_used": 300,
+            "cost_usd": 0.03,
+        }))
+
+        assert abs(counter.session_cost - 0.08) < 1e-9
+        assert abs(counter.agent_cost("work") - 0.08) < 1e-9
+
+    @pytest.mark.asyncio
+    async def test_zero_cost_not_added(self) -> None:
+        handler, stack, buf, counter = _make_stack_renderer()
+
+        await handler.handle(parse_event({
+            "type": "run_complete",
+            "agent": "work",
+            "tokens_used": 500,
+            "cost_usd": 0.0,
+        }))
+
+        assert counter.session_cost == 0.0
+
+    @pytest.mark.asyncio
+    async def test_cost_tracked_per_agent(self) -> None:
+        handler, stack, buf, counter = _make_stack_renderer()
+
+        await handler.handle(parse_event({
+            "type": "run_complete",
+            "agent": "work",
+            "tokens_used": 200,
+            "cost_usd": 0.10,
+        }))
+        await handler.handle(parse_event({
+            "type": "run_complete",
+            "agent": "finance",
+            "tokens_used": 150,
+            "cost_usd": 0.07,
+        }))
+
+        assert counter.agent_cost("work") == 0.10
+        assert counter.agent_cost("finance") == 0.07
+        assert abs(counter.session_cost - 0.17) < 1e-9
+
+    @pytest.mark.asyncio
+    async def test_missing_cost_field_defaults_to_zero(self) -> None:
+        handler, stack, buf, counter = _make_stack_renderer()
+
+        await handler.handle(parse_event({
+            "type": "run_complete",
+            "agent": "work",
+            "tokens_used": 200,
+        }))
+
+        assert counter.session_cost == 0.0

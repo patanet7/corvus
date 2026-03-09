@@ -134,3 +134,123 @@ class TestTokenCounterFormatDisplay:
         counter.add("huginn", 500)
         counter.add("work", 700)
         assert counter.format_display() == "1.2k tok"
+
+
+# ===========================================================================
+# Cost tracking — Task #19
+# ===========================================================================
+
+
+class TestCostAccumulation:
+    """add_cost accumulates USD cost per-agent and session-wide."""
+
+    def test_single_agent_single_cost(self) -> None:
+        counter = TokenCounter()
+        counter.add_cost("huginn", 0.05)
+        assert counter.agent_cost("huginn") == 0.05
+        assert counter.session_cost == 0.05
+
+    def test_single_agent_multiple_costs(self) -> None:
+        counter = TokenCounter()
+        counter.add_cost("huginn", 0.05)
+        counter.add_cost("huginn", 0.10)
+        assert abs(counter.agent_cost("huginn") - 0.15) < 1e-9
+        assert abs(counter.session_cost - 0.15) < 1e-9
+
+    def test_multiple_agents_tracked_independently(self) -> None:
+        counter = TokenCounter()
+        counter.add_cost("huginn", 0.05)
+        counter.add_cost("work", 0.12)
+        counter.add_cost("finance", 0.03)
+        assert counter.agent_cost("huginn") == 0.05
+        assert counter.agent_cost("work") == 0.12
+        assert counter.agent_cost("finance") == 0.03
+
+    def test_session_cost_across_agents(self) -> None:
+        counter = TokenCounter()
+        counter.add_cost("huginn", 0.05)
+        counter.add_cost("work", 0.10)
+        counter.add_cost("huginn", 0.02)
+        assert abs(counter.session_cost - 0.17) < 1e-9
+
+    def test_unknown_agent_cost_returns_zero(self) -> None:
+        counter = TokenCounter()
+        assert counter.agent_cost("nonexistent") == 0.0
+
+    def test_fresh_counter_session_cost_is_zero(self) -> None:
+        counter = TokenCounter()
+        assert counter.session_cost == 0.0
+
+
+class TestCostReset:
+    """reset() clears cost state along with token state."""
+
+    def test_reset_clears_session_cost(self) -> None:
+        counter = TokenCounter()
+        counter.add_cost("huginn", 0.50)
+        counter.add_cost("work", 0.30)
+        counter.reset()
+        assert counter.session_cost == 0.0
+
+    def test_reset_clears_agent_costs(self) -> None:
+        counter = TokenCounter()
+        counter.add_cost("huginn", 0.50)
+        counter.reset()
+        assert counter.agent_cost("huginn") == 0.0
+
+    def test_add_cost_after_reset_starts_fresh(self) -> None:
+        counter = TokenCounter()
+        counter.add_cost("huginn", 0.50)
+        counter.reset()
+        counter.add_cost("huginn", 0.10)
+        assert counter.agent_cost("huginn") == 0.10
+        assert counter.session_cost == 0.10
+
+
+class TestFormatCost:
+    """format_cost() renders USD with two decimal places."""
+
+    def test_zero_cost(self) -> None:
+        counter = TokenCounter()
+        assert counter.format_cost() == "$0.00"
+
+    def test_small_cost(self) -> None:
+        counter = TokenCounter()
+        counter.add_cost("huginn", 0.0312)
+        assert counter.format_cost() == "$0.03"
+
+    def test_dollar_plus_cost(self) -> None:
+        counter = TokenCounter()
+        counter.add_cost("huginn", 1.0567)
+        assert counter.format_cost() == "$1.06"
+
+    def test_accumulated_cost(self) -> None:
+        counter = TokenCounter()
+        counter.add_cost("huginn", 0.10)
+        counter.add_cost("work", 0.12)
+        assert counter.format_cost() == "$0.22"
+
+
+class TestFormatDisplayWithCost:
+    """format_display() includes cost when cost > 0."""
+
+    def test_no_cost_shows_tokens_only(self) -> None:
+        counter = TokenCounter()
+        counter.add("huginn", 5000)
+        assert counter.format_display() == "5.0k tok"
+
+    def test_with_cost_shows_tokens_and_cost(self) -> None:
+        counter = TokenCounter()
+        counter.add("huginn", 5000)
+        counter.add_cost("huginn", 0.22)
+        assert counter.format_display() == "5.0k tok \u00b7 $0.22"
+
+    def test_small_tokens_with_cost(self) -> None:
+        counter = TokenCounter()
+        counter.add("huginn", 42)
+        counter.add_cost("huginn", 0.01)
+        assert counter.format_display() == "42 tok \u00b7 $0.01"
+
+    def test_zero_tokens_zero_cost(self) -> None:
+        counter = TokenCounter()
+        assert counter.format_display() == "0 tok"

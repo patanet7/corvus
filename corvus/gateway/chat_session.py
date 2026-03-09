@@ -10,6 +10,8 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+from collections.abc import Callable, Coroutine
+from typing import Any
 
 from corvus.gateway.confirm_queue import ConfirmQueue
 import uuid
@@ -134,6 +136,53 @@ class ChatSession:
         self._emit_phase = self.emitter.emit_phase  # type: ignore[assignment]
         self._emit_run_failure = self.emitter.emit_run_failure  # type: ignore[assignment]
         self._emit_run_interrupted = self.emitter.emit_run_interrupted  # type: ignore[assignment]
+
+    # ------------------------------------------------------------------
+    # Public API for in-process / non-WebSocket callers
+    # ------------------------------------------------------------------
+
+    def set_ws_interceptor(
+        self,
+        interceptor: Callable[[dict], Coroutine[Any, Any, None]] | None,
+    ) -> None:
+        """Replace the emitter's WebSocket send function.
+
+        Used by in-process gateways (e.g. the TUI) to intercept outbound
+        payloads without a real WebSocket connection.
+        """
+        self.emitter._ws_send_fn = interceptor
+
+    async def execute_dispatch(
+        self,
+        *,
+        dispatch_id: str,
+        turn_id: str,
+        resolution: ChatDispatchResolution,
+        user_message: str,
+        user_model: str | None,
+        requires_tools: bool,
+    ) -> None:
+        """Public wrapper around the dispatch lifecycle.
+
+        Delegates to the same internal pipeline used by the WebSocket
+        message loop, but callable from non-WebSocket callers.
+        """
+        await self._execute_dispatch_lifecycle(
+            dispatch_id=dispatch_id,
+            turn_id=turn_id,
+            resolution=resolution,
+            user_message=user_message,
+            user_model=user_model,
+            requires_tools=requires_tools,
+        )
+
+    def interrupt_current_turn(self) -> None:
+        """Signal the current dispatch turn to stop.
+
+        No-op if there is no active turn.
+        """
+        if self._current_turn is not None:
+            self._current_turn.dispatch_interrupted.set()
 
     # ------------------------------------------------------------------
     # current_turn_id — proxied to emitter for consistency

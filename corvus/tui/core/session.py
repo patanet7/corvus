@@ -54,6 +54,24 @@ class TuiSessionManager:
         sessions = await self._gateway.list_sessions()
         return sessions[:limit]
 
+    async def search(self, query: str) -> list[SessionSummary]:
+        """Search sessions by query matching summary or agent_name (case-insensitive).
+
+        Args:
+            query: Search string to match against session summary and agent_name.
+
+        Returns:
+            List of SessionSummary objects whose summary or agent_name contains
+            the query string (case-insensitive).
+        """
+        sessions = await self.list_sessions()
+        q = query.lower()
+        return [
+            s
+            for s in sessions
+            if q in (s.summary or "").lower() or q in (s.agent_name or "").lower()
+        ]
+
     def format_session_summary(self, session: SessionSummary) -> str:
         """Format a session for display in a list.
 
