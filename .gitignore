@@ -38,3 +38,4 @@ frontend/storybook-static/
 *.log
 *.pid
 .worktrees/
+logs/

@@ -3,10 +3,12 @@
 import asyncio
 import logging
 
+from dotenv import load_dotenv
 from prompt_toolkit import PromptSession
 from prompt_toolkit.formatted_text import HTML
-from prompt_toolkit.patch_stdout import patch_stdout
 from rich.console import Console
+
+load_dotenv()
 
 from corvus.tui.commands.registry import CommandRegistry, InputTier, SlashCommand
 from corvus.tui.core.agent_stack import AgentStack
@@ -247,48 +249,47 @@ class TuiApp:
         self.renderer.render_system("Type /help for available commands, /quit to exit.\n")
 
         try:
-            with patch_stdout():
-                while True:
-                    try:
-                        prompt = self._build_prompt()
-                        raw = await session.prompt_async(prompt)
-                    except EOFError:
-                        break
-                    except KeyboardInterrupt:
-                        break
+            while True:
+                try:
+                    prompt = self._build_prompt()
+                    raw = await session.prompt_async(prompt)
+                except EOFError:
+                    break
+                except KeyboardInterrupt:
+                    break
 
-                    if not raw or not raw.strip():
+                if not raw or not raw.strip():
+                    continue
+
+                parsed = self.parser.parse(raw)
+                tier = self.command_router.classify(parsed)
+
+                # Handle pending confirmation
+                pending = self.event_handler.pending_confirm
+                if pending is not None:
+                    response = raw.strip().lower()
+                    if response in ("y", "yes"):
+                        await self.gateway.respond_confirm(pending.tool_id, approved=True)
+                    elif response in ("n", "no"):
+                        await self.gateway.respond_confirm(pending.tool_id, approved=False)
+                    elif response in ("a", "always"):
+                        await self.gateway.respond_confirm(pending.tool_id, approved=True)
+                    else:
+                        self.renderer.render_error("Please respond with (y)es, (n)o, or (a)lways")
+                        continue
+                    self.event_handler.clear_confirm()
+                    continue
+
+                if tier is InputTier.SYSTEM:
+                    handled = await self._handle_system_command(parsed)
+                    if handled:
                         continue
 
-                    parsed = self.parser.parse(raw)
-                    tier = self.command_router.classify(parsed)
+                if tier is InputTier.SERVICE:
+                    self.renderer.render_system(f"/{parsed.command} — not yet implemented")
+                    continue
 
-                    # Handle pending confirmation
-                    pending = self.event_handler.pending_confirm
-                    if pending is not None:
-                        response = raw.strip().lower()
-                        if response in ("y", "yes"):
-                            await self.gateway.respond_confirm(pending.tool_id, approved=True)
-                        elif response in ("n", "no"):
-                            await self.gateway.respond_confirm(pending.tool_id, approved=False)
-                        elif response in ("a", "always"):
-                            await self.gateway.respond_confirm(pending.tool_id, approved=True)
-                        else:
-                            self.renderer.render_error("Please respond with (y)es, (n)o, or (a)lways")
-                            continue
-                        self.event_handler.clear_confirm()
-                        continue
-
-                    if tier is InputTier.SYSTEM:
-                        handled = await self._handle_system_command(parsed)
-                        if handled:
-                            continue
-
-                    if tier is InputTier.SERVICE:
-                        self.renderer.render_system(f"/{parsed.command} — not yet implemented")
-                        continue
-
-                    await self._handle_agent_input(parsed)
+                await self._handle_agent_input(parsed)
 
         except KeyboardInterrupt:
             pass
@@ -299,5 +300,13 @@ class TuiApp:
 
 def main() -> None:
     """Entry point for python -m corvus.tui."""
+    import os
+
+    os.makedirs("logs", exist_ok=True)
+    logging.basicConfig(
+        filename="logs/tui.log",
+        level=logging.INFO,
+        format="%(asctime)s %(name)s %(levelname)s %(message)s",
+    )
     app = TuiApp()
     asyncio.run(app.run())
