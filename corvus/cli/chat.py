@@ -28,6 +28,41 @@ from pathlib import Path
 
 logger = logging.getLogger("corvus-cli")
 
+# ---------------------------------------------------------------------------
+# Subprocess environment allowlist (F-001)
+# ---------------------------------------------------------------------------
+# Only these vars are copied from the parent into the Claude CLI subprocess.
+# Credentials (ANTHROPIC_API_KEY, HA_TOKEN, PAPERLESS_API_TOKEN, AWS_*,
+# etc.) are NEVER forwarded.  Tools receive credentials in-process via
+# ToolContext, not via the subprocess environment.
+# ---------------------------------------------------------------------------
+_ALLOWED_ENV: frozenset[str] = frozenset({
+    "PATH", "HOME", "SHELL", "TERM", "LANG", "LC_ALL",
+    "TMPDIR", "USER", "LOGNAME",
+    "XDG_CONFIG_HOME", "XDG_DATA_HOME", "XDG_CACHE_HOME",
+    "XDG_RUNTIME_DIR", "XDG_STATE_HOME",
+})
+
+
+def _build_subprocess_env(
+    *,
+    extra: dict[str, str] | None = None,
+) -> dict[str, str]:
+    """Build a minimal environment for the Claude CLI subprocess.
+
+    Only explicitly allowed vars from the parent process plus any
+    *extra* vars (like ANTHROPIC_BASE_URL when LiteLLM is running)
+    are included.  Credentials NEVER leak via environment.
+    """
+    env: dict[str, str] = {}
+    for key in _ALLOWED_ENV:
+        val = os.environ.get(key)
+        if val is not None:
+            env[key] = val
+    if extra:
+        env.update(extra)
+    return env
+
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     """Parse CLI arguments for corvus chat."""
@@ -142,8 +177,13 @@ def _prepare_isolated_env(
     from corvus.config import CLAUDE_CONFIG_TEMPLATE, CLAUDE_RUNTIME_HOME
     from corvus.gateway.options import resolve_claude_runtime_home
 
-    # Start with current env (inherits ANTHROPIC_BASE_URL from LiteLLM)
-    env = dict(os.environ)
+    # Build a minimal env — only allowlisted vars plus ANTHROPIC_BASE_URL
+    # which the LiteLLM manager sets in os.environ at startup.
+    subprocess_extra: dict[str, str] = {}
+    base_url = os.environ.get("ANTHROPIC_BASE_URL")
+    if base_url is not None:
+        subprocess_extra["ANTHROPIC_BASE_URL"] = base_url
+    env = _build_subprocess_env(extra=subprocess_extra)
 
     # Resolve per-agent runtime home
     runtime_home = resolve_claude_runtime_home(
@@ -188,8 +228,9 @@ def _prepare_isolated_env(
             updated = True
 
     # Pre-approve the ANTHROPIC_API_KEY so Claude Code doesn't prompt.
-    # Claude Code stores the last ~20 chars of approved keys.
-    api_key = env.get("ANTHROPIC_API_KEY", "")
+    # Read from os.environ (NOT the subprocess env — the key is
+    # intentionally excluded from the subprocess for security).
+    api_key = os.environ.get("ANTHROPIC_API_KEY", "")
     if api_key:
         key_suffix = api_key[-20:]
         responses = existing.setdefault("customApiKeyResponses", {"approved": [], "rejected": []})

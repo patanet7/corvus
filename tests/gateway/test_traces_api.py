@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import os
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -12,22 +13,30 @@ from starlette.testclient import TestClient
 from corvus.api.traces import configure, router, ws_router
 from corvus.config import ALLOWED_USERS
 from corvus.gateway.trace_hub import TraceHub
+from corvus.security.session_auth import SessionAuthManager
 from corvus.session_manager import SessionManager
 
 _AUTH_USER = ALLOWED_USERS[0]
 _AUTH_HEADERS = {"X-Remote-User": _AUTH_USER}
+_TEST_SECRET = os.urandom(64)
 
 
-def _build_client(tmp_path: Path) -> tuple[TestClient, SessionManager, TraceHub]:
+def _build_client(
+    tmp_path: Path,
+) -> tuple[TestClient, SessionManager, TraceHub, SessionAuthManager]:
     db_path = tmp_path / "traces.sqlite"
     session_mgr = SessionManager(db_path=db_path)
     trace_hub = TraceHub()
-    configure(session_mgr, trace_hub)
+    session_auth = SessionAuthManager(
+        secret=_TEST_SECRET,
+        allowed_users=list(ALLOWED_USERS),
+    )
+    configure(session_mgr, trace_hub, session_auth=session_auth)
     app = FastAPI()
     app.include_router(router)
     app.include_router(ws_router)
     client = TestClient(app, headers=_AUTH_HEADERS)
-    return client, session_mgr, trace_hub
+    return client, session_mgr, trace_hub, session_auth
 
 
 def _seed_trace(session_mgr: SessionManager, *, session_id: str, user: str, event_type: str, source: str) -> int:
@@ -46,7 +55,7 @@ def _seed_trace(session_mgr: SessionManager, *, session_id: str, user: str, even
 
 class TestTraceAPI:
     def test_post_trace_event_ingests_and_returns_row(self, tmp_path: Path):
-        client, session_mgr, _trace_hub = _build_client(tmp_path)
+        client, session_mgr, _trace_hub, _session_auth = _build_client(tmp_path)
         session_mgr.start("sess-trace-api-post-1", user=_AUTH_USER, started_at=datetime.now(UTC))
 
         resp = client.post(
@@ -71,7 +80,7 @@ class TestTraceAPI:
         assert any(row["id"] == body["id"] for row in recent)
 
     def test_list_recent_traces_user_scoped(self, tmp_path: Path):
-        client, session_mgr, _trace_hub = _build_client(tmp_path)
+        client, session_mgr, _trace_hub, _session_auth = _build_client(tmp_path)
         seeded_id = _seed_trace(
             session_mgr,
             session_id="sess-trace-api-1",
@@ -95,7 +104,7 @@ class TestTraceAPI:
         assert rows[0]["session_id"] == "sess-trace-api-1"
 
     def test_list_recent_traces_with_filters(self, tmp_path: Path):
-        client, session_mgr, _trace_hub = _build_client(tmp_path)
+        client, session_mgr, _trace_hub, _session_auth = _build_client(tmp_path)
         _seed_trace(
             session_mgr,
             session_id="sess-trace-api-3",
@@ -122,7 +131,7 @@ class TestTraceAPI:
         assert rows[0]["source_app"] == "work"
 
     def test_trace_filter_options(self, tmp_path: Path):
-        client, session_mgr, _trace_hub = _build_client(tmp_path)
+        client, session_mgr, _trace_hub, _session_auth = _build_client(tmp_path)
         _seed_trace(
             session_mgr,
             session_id="sess-trace-api-5",
@@ -139,7 +148,7 @@ class TestTraceAPI:
         assert "run_phase" in body["hook_event_types"]
 
     def test_get_trace_event(self, tmp_path: Path):
-        client, session_mgr, _trace_hub = _build_client(tmp_path)
+        client, session_mgr, _trace_hub, _session_auth = _build_client(tmp_path)
         trace_id = _seed_trace(
             session_mgr,
             session_id="sess-trace-api-6",
@@ -155,7 +164,7 @@ class TestTraceAPI:
         assert body["hook_event_type"] == "dispatch_complete"
 
     def test_list_session_traces_not_found_when_user_mismatch(self, tmp_path: Path):
-        client, session_mgr, _trace_hub = _build_client(tmp_path)
+        client, session_mgr, _trace_hub, _session_auth = _build_client(tmp_path)
         _seed_trace(
             session_mgr,
             session_id="sess-trace-api-7",
@@ -169,7 +178,7 @@ class TestTraceAPI:
         assert resp.json()["error"] == "Session not found"
 
     def test_ws_traces_stream_init_and_live_event(self, tmp_path: Path):
-        client, session_mgr, trace_hub = _build_client(tmp_path)
+        client, session_mgr, trace_hub, session_auth = _build_client(tmp_path)
         trace_id = _seed_trace(
             session_mgr,
             session_id="sess-trace-api-8",
@@ -178,7 +187,8 @@ class TestTraceAPI:
             source="router",
         )
 
-        with client.websocket_connect("/ws/traces") as ws:
+        token = session_auth.create_session_token(_AUTH_USER)
+        with client.websocket_connect(f"/ws/traces?token={token}") as ws:
             init_msg = ws.receive_json()
             assert init_msg["type"] == "trace_init"
             assert any(row["id"] == trace_id for row in init_msg["events"])

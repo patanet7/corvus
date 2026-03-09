@@ -57,6 +57,16 @@ class AgentToolConfig:
     modules: dict[str, dict] = field(default_factory=dict)
     confirm_gated: list[str] = field(default_factory=list)
     mcp_servers: list[dict] = field(default_factory=list)
+    permission_tier: str = "default"  # "strict" | "default" | "break_glass"
+    extra_deny: list[str] = field(default_factory=list)
+
+    def __post_init__(self):
+        valid_tiers = {"strict", "default", "break_glass"}
+        if self.permission_tier not in valid_tiers:
+            raise ValueError(
+                f"permission_tier must be one of {sorted(valid_tiers)}, "
+                f"got {self.permission_tier!r}"
+            )
 
 
 @dataclass

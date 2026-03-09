@@ -27,7 +27,6 @@ def test_chat_module_imports() -> None:
                 "from corvus.cli.chat_render import render_welcome; "
                 "from corvus.cli.compose_claude_md import compose_claude_md; "
                 "from corvus.cli.compose_system_prompt import compose_system_prompt; "
-                "from corvus.cli.tool_token import create_token, validate_token; "
                 "from corvus.cli.tool_registry import _MODULE_REGISTRY"
             ),
         ],

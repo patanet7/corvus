@@ -1,0 +1,64 @@
+model_list:
+- litellm_params:
+    api_key: os.environ/ANTHROPIC_API_KEY
+    model: anthropic/claude-haiku-4-5-20251001
+  model_name: haiku
+- litellm_params:
+    api_key: os.environ/ANTHROPIC_API_KEY
+    model: anthropic/claude-sonnet-4-20250514
+  model_name: sonnet
+- litellm_params:
+    api_key: os.environ/ANTHROPIC_API_KEY
+    model: anthropic/claude-opus-4-20250514
+  model_name: opus
+- litellm_params:
+    api_key: os.environ/ANTHROPIC_API_KEY
+    model: anthropic/claude-sonnet-4-6
+  model_name: claude-sonnet-4-6
+- litellm_params:
+    api_key: os.environ/ANTHROPIC_API_KEY
+    model: anthropic/claude-sonnet-4-20250514
+  model_name: claude-sonnet-4-20250514
+- litellm_params:
+    api_key: os.environ/ANTHROPIC_API_KEY
+    model: anthropic/claude-opus-4-6
+  model_name: claude-opus-4-6
+- litellm_params:
+    api_key: os.environ/ANTHROPIC_API_KEY
+    model: anthropic/claude-opus-4-20250514
+  model_name: claude-opus-4-20250514
+- litellm_params:
+    api_key: os.environ/ANTHROPIC_API_KEY
+    model: anthropic/claude-haiku-4-5-20251001
+  model_name: claude-haiku-4-5-20251001
+- litellm_params:
+    api_base: http://localhost:11434
+    model: ollama/*
+  model_name: ollama/*
+- litellm_params:
+    api_base: http://localhost:8100
+    api_key: not-needed
+    model: openai/kimi-k2
+  model_name: kimi
+- litellm_params:
+    api_key: os.environ/OPENAI_API_KEY
+    model: openai/gpt-4o
+  model_name: openai/gpt-4o
+- litellm_params:
+    api_base: os.environ/OPENAI_COMPAT_BASE_URL
+    api_key: os.environ/OPENAI_COMPAT_API_KEY
+    model: openai/custom
+  model_name: openai-compat
+router_settings:
+  allowed_fails: 3
+  cooldown_time: 30
+  fallbacks:
+  - haiku:
+    - ollama/*
+  - sonnet:
+    - ollama/*
+  - opus:
+    - ollama/*
+  num_retries: 3
+  retry_after: 5
+  routing_strategy: simple-shuffle

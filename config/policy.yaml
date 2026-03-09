@@ -1,0 +1,27 @@
+# Global security policy — source of truth for permission deny lists and tier config.
+# global_deny patterns apply to ALL tiers including break-glass.
+
+global_deny:
+  - "*.env*"
+  - "*.ssh/*"
+  - "*credentials*"
+  - "*/secrets/*"
+  - "*.pem"
+  - "*.key"
+  - "*passphrase*"
+
+tiers:
+  strict:
+    mode: allowlist
+    confirm_default: deny
+
+  default:
+    mode: allowlist_with_baseline
+    confirm_default: deny
+
+  break_glass:
+    mode: allow_all
+    confirm_default: allow
+    requires_auth: true
+    token_ttl: 3600   # 1 hour default
+    max_ttl: 14400    # 4 hours max

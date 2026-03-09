@@ -120,8 +120,14 @@ class TestFrontendWebSocketContracts:
 
         return TestClient(app)
 
+    def _get_token(self, client) -> str:
+        resp = client.post("/api/auth/token")
+        assert resp.status_code == 200
+        return resp.json()["token"]
+
     def test_ws_init_payload_matches_frontend_init_contract(self, client):
-        with client.websocket_connect("/ws", headers={"X-Remote-User": "testuser"}) as ws:
+        token = self._get_token(client)
+        with client.websocket_connect(f"/ws?token={token}") as ws:
             init_msg = ws.receive_json()
             assert init_msg["type"] == "init"
             assert isinstance(init_msg.get("models"), list)
@@ -132,7 +138,8 @@ class TestFrontendWebSocketContracts:
             assert isinstance(init_msg.get("session_name"), str)
 
     def test_ws_ping_pong_contract(self, client):
-        with client.websocket_connect("/ws", headers={"X-Remote-User": "testuser"}) as ws:
+        token = self._get_token(client)
+        with client.websocket_connect(f"/ws?token={token}") as ws:
             _ = ws.receive_json()  # init
             ws.send_json({"type": "ping"})
             pong = ws.receive_json()

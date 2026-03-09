@@ -3,32 +3,41 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 from collections.abc import Sequence
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import JSONResponse
 
 from corvus.auth import get_user
-from corvus.config import ALLOWED_USERS
 from corvus.gateway.trace_hub import TraceHub
+from corvus.security.session_auth import SessionAuthManager
 from corvus.session_manager import SessionManager
+
+logger = logging.getLogger("corvus-gateway")
 
 router = APIRouter(prefix="/api", tags=["traces"])
 ws_router = APIRouter(tags=["traces"])
 
 _session_mgr: SessionManager | None = None
 _trace_hub: TraceHub | None = None
+_session_auth: SessionAuthManager | None = None
 
 
-def configure(session_mgr: SessionManager, trace_hub: TraceHub) -> None:
+def configure(
+    session_mgr: SessionManager,
+    trace_hub: TraceHub,
+    session_auth: SessionAuthManager | None = None,
+) -> None:
     """Wire trace routes to runtime dependencies."""
     if not isinstance(session_mgr, SessionManager):
         raise TypeError(f"Expected SessionManager, got {type(session_mgr).__name__}")
     if not isinstance(trace_hub, TraceHub):
         raise TypeError(f"Expected TraceHub, got {type(trace_hub).__name__}")
-    global _session_mgr, _trace_hub
+    global _session_mgr, _trace_hub, _session_auth
     _session_mgr = session_mgr
     _trace_hub = trace_hub
+    _session_auth = session_auth
 
 
 def _require_session_mgr() -> SessionManager:
@@ -159,14 +168,27 @@ async def websocket_trace_stream(websocket: WebSocket):
     session_mgr = _require_session_mgr()
     trace_hub = _require_trace_hub()
 
-    user = websocket.headers.get("X-Remote-User") or websocket.headers.get("Remote-User")
-    if not user:
-        client_host = websocket.client.host if websocket.client else None
-        if client_host in ("127.0.0.1", "::1", "localhost"):
-            user = ALLOWED_USERS[0]
-    if not user or user not in ALLOWED_USERS:
-        await websocket.close(code=4401, reason="Unauthorized")
+    if _session_auth is None:
+        logger.error("/ws/traces: SessionAuthManager not configured — rejecting connection")
+        await websocket.close(code=4401, reason="Auth not configured")
         return
+
+    token = websocket.query_params.get("token")
+    headers = {k.lower(): v for k, v in websocket.headers.items()}
+    client_host = websocket.client.host if websocket.client else None
+
+    auth_result = _session_auth.authenticate(
+        client_host=client_host,
+        token=token,
+        headers=headers,
+    )
+    if not auth_result.authenticated:
+        logger.debug(
+            "/ws/traces auth denied for %s: %s", client_host, auth_result.reason
+        )
+        await websocket.close(code=4401, reason=auth_result.reason or "Unauthorized")
+        return
+    user = auth_result.user
 
     await websocket.accept()
 

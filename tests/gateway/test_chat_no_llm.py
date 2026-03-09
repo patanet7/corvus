@@ -1,6 +1,6 @@
 """Test WebSocket chat returns error when no LLM backend is configured.
 
-NOTE: Uses monkeypatch.delenv() to clear real env vars — this is NOT mocking.
+NOTE: Uses monkeypatch.delenv() to clear real env vars -- this is NOT mocking.
 It modifies the actual process environment so the real _any_llm_configured()
 check returns False. Acceptable under no-mocks policy.
 """
@@ -8,6 +8,13 @@ check returns False. Acceptable under no-mocks policy.
 from fastapi.testclient import TestClient
 
 from corvus.server import app
+
+
+def _get_session_token(client: TestClient) -> str:
+    """Bootstrap a session token via the localhost /api/auth/token endpoint."""
+    resp = client.post("/api/auth/token")
+    assert resp.status_code == 200, f"Token bootstrap failed: {resp.text}"
+    return resp.json()["token"]
 
 
 def test_chat_without_llm_returns_error(monkeypatch):
@@ -24,7 +31,8 @@ def test_chat_without_llm_returns_error(monkeypatch):
         monkeypatch.delenv(var, raising=False)
 
     client = TestClient(app)
-    with client.websocket_connect("/ws", headers={"X-Remote-User": "testuser"}) as ws:
+    token = _get_session_token(client)
+    with client.websocket_connect(f"/ws?token={token}") as ws:
         init = ws.receive_json()
         assert init.get("type") == "init"
         ws.send_json({"type": "chat", "message": "hello"})

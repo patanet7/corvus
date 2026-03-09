@@ -112,15 +112,19 @@ class TestWebSocketAuth:
                 pass
 
     def test_ws_rejects_unknown_user(self, bare_client: TestClient) -> None:
-        """WebSocket with unknown user should be rejected."""
+        """WebSocket with spoofed proxy header (no trusted proxy) should be rejected."""
         with pytest.raises((WebSocketDisconnect, RuntimeError)):
             with bare_client.websocket_connect("/ws", headers={"X-Remote-User": "hacker"}):
                 pass
 
-    def test_ws_accepts_allowed_user(self, client: TestClient) -> None:
-        """WebSocket with valid user should be accepted."""
-        with client.websocket_connect("/ws", headers={"X-Remote-User": "testuser"}) as _ws:
-            # Connection opened — that's the test. Close cleanly.
+    def test_ws_accepts_valid_session_token(self, bare_client: TestClient) -> None:
+        """WebSocket with valid session token should be accepted."""
+        # Bootstrap a token via localhost /api/auth/token
+        resp = bare_client.post("/api/auth/token")
+        assert resp.status_code == 200
+        token = resp.json()["token"]
+        with bare_client.websocket_connect(f"/ws?token={token}") as _ws:
+            # Connection opened -- that's the test. Close cleanly.
             pass
 
 

@@ -65,7 +65,7 @@ class TestServerSourceContracts:
 
     def test_ws_auth_before_accept(self):
         """Verify WebSocket auth check happens before accept() call."""
-        auth_pos = self.chat_source.index("websocket.headers.get")
+        auth_pos = self.chat_source.index("session_auth.authenticate")
         close_pos = self.chat_source.index("await websocket.close(code=4401")
         accept_pos = self.chat_source.index("await websocket.accept()")
         # Auth check and rejection must come before accept
@@ -79,8 +79,10 @@ class TestServerSourceContracts:
     def test_imports_allowed_users_for_auth(self):
         assert "ALLOWED_USERS" in self.chat_source
 
-    def test_ws_checks_auth_header(self):
-        assert "X-Remote-User" in self.chat_source
+    def test_ws_uses_session_auth(self):
+        """Verify WebSocket auth delegates to SessionAuthManager."""
+        assert "SessionAuthManager" in self.chat_source
+        assert "session_auth.authenticate" in self.chat_source
 
     def test_imports_hooks(self):
         assert "create_hooks" in self.options_source

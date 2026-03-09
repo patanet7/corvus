@@ -2,15 +2,22 @@
 
 Gateway-level only. Invisible to all agents. Per-session activation.
 Uses Argon2id for passphrase hashing with escalating rate-limited lockout.
+HMAC-SHA256 integrity protection on lockout state to prevent counter reset.
 """
 
+import hashlib
+import hmac
 import json
+import logging
 import os
+import stat
 import time
 from pathlib import Path
 
 from argon2 import PasswordHasher
 from argon2.exceptions import VerifyMismatchError
+
+logger = logging.getLogger(__name__)
 
 DEFAULT_LOCKOUT_THRESHOLDS = [
     (3, 900),  # 3 failures -> 15 min
@@ -76,7 +83,7 @@ class BreakGlassManager:
         if self.is_locked_out():
             return False
 
-        stored_hash = self._hash_file.read_text().strip()
+        stored_hash = self._read_passphrase_hash()
         try:
             self._hasher.verify(stored_hash, passphrase)
         except VerifyMismatchError:
@@ -132,6 +139,24 @@ class BreakGlassManager:
     # Internal helpers
     # ------------------------------------------------------------------
 
+    def _read_passphrase_hash(self) -> str:
+        """Read the passphrase hash from disk with permission verification.
+
+        Logs a warning if the file permissions are not 0o600 (owner-only).
+        """
+        try:
+            file_stat = os.stat(self._hash_file)
+            file_mode = stat.S_IMODE(file_stat.st_mode)
+            if file_mode != 0o600:
+                logger.warning(
+                    "passphrase.hash has permissions %04o, expected 0600 — "
+                    "file may have been tampered with",
+                    file_mode,
+                )
+        except OSError:
+            logger.warning("Unable to stat passphrase.hash for permission check")
+        return self._hash_file.read_text().strip()
+
     def _record_failure(self) -> None:
         """Increment the failure counter and apply a lockout if a threshold is met."""
         self._lockout_state["failures"] = self._lockout_state.get("failures", 0) + 1
@@ -144,20 +169,76 @@ class BreakGlassManager:
 
         self._save_lockout_state()
 
+    def _get_hmac_key(self) -> bytes:
+        """Derive the HMAC key from the passphrase hash file contents.
+
+        Falls back to an empty key if the hash file does not exist, which
+        ensures HMAC verification still works (it will just fail on tampered
+        data since the key is deterministic).
+        """
+        if self._hash_file.exists():
+            return self._hash_file.read_bytes()
+        return b""
+
+    def _compute_hmac(self, data_bytes: bytes) -> str:
+        """Compute HMAC-SHA256 hex digest over *data_bytes*."""
+        key = self._get_hmac_key()
+        return hmac.new(key, data_bytes, hashlib.sha256).hexdigest()
+
     def _load_lockout_state(self) -> dict:
-        """Load lockout state from disk, or return clean defaults."""
+        """Load lockout state from disk with HMAC integrity verification.
+
+        If the HMAC does not match or the file is corrupt, the state resets
+        to a **locked** posture (fail-safe) — treating corruption as an attack.
+        """
+        locked_default = {
+            "failures": self._lockout_thresholds[-1][0] if self._lockout_thresholds else 9,
+            "locked_until": time.time() + (self._lockout_thresholds[-1][1] if self._lockout_thresholds else 86400),
+        }
         if self._lockout_file.exists():
             try:
-                data = json.loads(self._lockout_file.read_text())
+                raw = self._lockout_file.read_text()
+                envelope = json.loads(raw)
+
+                # Extract HMAC and data payload
+                stored_hmac = envelope.get("hmac", "")
+                data = envelope.get("data")
+                if data is None:
+                    # Legacy format (no HMAC envelope) — treat as tampered
+                    logger.warning(
+                        "lockout.json missing HMAC envelope — resetting to locked state"
+                    )
+                    return locked_default
+
+                data_bytes = json.dumps(data, sort_keys=True).encode()
+                expected_hmac = self._compute_hmac(data_bytes)
+
+                if not hmac.compare_digest(stored_hmac, expected_hmac):
+                    logger.warning(
+                        "lockout.json HMAC mismatch — file may be tampered, "
+                        "resetting to locked state"
+                    )
+                    return locked_default
+
                 return {
                     "failures": data.get("failures", 0),
                     "locked_until": data.get("locked_until", 0.0),
                 }
-            except (json.JSONDecodeError, OSError):
-                pass
+            except (json.JSONDecodeError, OSError, TypeError) as exc:
+                logger.warning(
+                    "lockout.json unreadable (%s) — resetting to locked state", exc
+                )
+                return locked_default
         return {"failures": 0, "locked_until": 0.0}
 
     def _save_lockout_state(self) -> None:
-        """Persist lockout state to ``lockout.json``."""
+        """Persist lockout state to ``lockout.json`` with HMAC integrity."""
         self._config_dir.mkdir(parents=True, exist_ok=True)
-        self._lockout_file.write_text(json.dumps(self._lockout_state))
+        data = {
+            "failures": self._lockout_state["failures"],
+            "locked_until": self._lockout_state["locked_until"],
+        }
+        data_bytes = json.dumps(data, sort_keys=True).encode()
+        digest = self._compute_hmac(data_bytes)
+        envelope = {"data": data, "hmac": digest}
+        self._lockout_file.write_text(json.dumps(envelope))
