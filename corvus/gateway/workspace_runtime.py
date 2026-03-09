@@ -30,6 +30,14 @@ _SNAPSHOT_IGNORE = (
     "frontend/node_modules",
     "frontend/.svelte-kit",
     "frontend/storybook-static",
+    # Security-sensitive files — must never leak into agent workspaces
+    ".env",
+    ".env.*",
+    "config",
+    "CLAUDE.md",
+    "*.hash",
+    "lockout.json",
+    ".corvus",
 )
 
 
