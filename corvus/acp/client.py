@@ -129,7 +129,7 @@ class CorvusACPClient:
         """
         env = build_acp_spawn_env(workspace=self._config.workspace)
         cmd_parts = self._config.agent_entry.command_parts()
-        sandboxed_cmd = build_sandbox_command(cmd_parts)
+        sandboxed_cmd = build_sandbox_command(cmd_parts, workspace=self._config.workspace)
 
         logger.info(
             "Spawning ACP agent %r: %s (workspace=%s)",

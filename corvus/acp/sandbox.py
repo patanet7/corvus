@@ -53,7 +53,69 @@ _CHILD_ALLOWED_KEYS: frozenset[str] = frozenset({
 
 _CHILD_SAFE_PATH: str = "/usr/bin:/bin"
 
-_DARWIN_SANDBOX_PROFILE: str = "(version 1)\n(allow default)\n(deny network*)"
+# System directories that sandboxed processes may read (macOS).
+_DARWIN_SYSTEM_READ_PATHS: tuple[str, ...] = (
+    "/usr",
+    "/bin",
+    "/lib",
+    "/System",
+    "/dev",
+    "/private/tmp",
+    "/private/var/tmp",
+    "/Library/Frameworks",
+    "/opt/homebrew",
+    "/usr/local",
+    "/Applications/Xcode.app",
+    "/private/var/db",
+)
+
+# Paths the sandbox may write to beyond the workspace.
+_DARWIN_SYSTEM_WRITE_PATHS: tuple[str, ...] = (
+    "/dev/null",
+    "/dev/tty",
+    "/dev/dtracehelper",
+)
+
+
+def _build_darwin_sandbox_profile(workspace: Path | None = None) -> str:
+    """Build a tightened macOS sandbox-exec profile.
+
+    When *workspace* is provided the profile grants read/write access to that
+    directory tree plus read-only access to essential system directories.
+    When *workspace* is ``None`` a restrictive default is returned that only
+    allows system reads (no user-directory file access).
+
+    Network access is always denied.
+    """
+    lines: list[str] = [
+        "(version 1)",
+        "(deny default)",
+        # Process execution, signals, IPC
+        "(allow process*)",
+        "(allow signal)",
+        "(allow sysctl-read)",
+        "(allow mach*)",
+    ]
+
+    # --- file reads ---
+    for sys_path in _DARWIN_SYSTEM_READ_PATHS:
+        lines.append(
+            f'(allow file-read* (subpath "{sys_path}"))'
+        )
+
+    if workspace is not None:
+        ws = str(workspace.resolve())
+        lines.append(f'(allow file-read* (subpath "{ws}"))')
+        lines.append(f'(allow file-write* (subpath "{ws}"))')
+
+    # --- limited writes ---
+    for sys_path in _DARWIN_SYSTEM_WRITE_PATHS:
+        lines.append(f'(allow file-write* (literal "{sys_path}"))')
+
+    # --- network deny (explicit, defense-in-depth) ---
+    lines.append("(deny network*)")
+
+    return "\n".join(lines)
 
 
 def _is_stripped(key: str) -> bool:
@@ -127,12 +189,17 @@ def build_acp_child_env(
 def build_sandbox_command(
     cmd: list[str],
     *,
+    workspace: Path | None = None,
     platform: str | None = None,
 ) -> list[str]:
-    """Wrap a command in a platform-specific sandbox for network isolation.
+    """Wrap a command in a platform-specific sandbox for process isolation.
+
+    On macOS the sandbox profile restricts file access to *workspace* (if
+    provided) plus essential system directories, and always denies network.
 
     Args:
         cmd: The command and arguments to sandbox.
+        workspace: Optional workspace directory for file-access scoping (macOS).
         platform: Override for sys.platform (useful for testing).
 
     Returns:
@@ -141,7 +208,8 @@ def build_sandbox_command(
     plat = platform if platform is not None else sys.platform
 
     if plat == "darwin":
-        return ["sandbox-exec", "-p", _DARWIN_SANDBOX_PROFILE, *cmd]
+        profile = _build_darwin_sandbox_profile(workspace)
+        return ["sandbox-exec", "-p", profile, *cmd]
 
     if plat == "linux":
         return ["unshare", "--net", "--map-root-user", *cmd]
