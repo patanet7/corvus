@@ -34,11 +34,18 @@ class SessionAuthManager:
     where any local process could connect with full user privileges.
     """
 
-    def __init__(self, *, secret: bytes, allowed_users: list[str]) -> None:
+    def __init__(
+        self,
+        *,
+        secret: bytes,
+        allowed_users: list[str],
+        trusted_proxy_ips: set[str] | None = None,
+    ) -> None:
         if len(secret) < MIN_SECRET_LEN:
             raise ValueError(f"Secret must be at least {MIN_SECRET_LEN} bytes")
         self._secret = secret
         self._allowed_users = set(allowed_users)
+        self._trusted_proxy_ips = trusted_proxy_ips or set()
 
     def create_session_token(self, user: str, ttl_seconds: int = 86400) -> str:
         """Create a signed session token for a user.
@@ -108,27 +115,25 @@ class SessionAuthManager:
         """Authenticate a WebSocket connection.
 
         Priority:
-        1. Trusted reverse-proxy headers (X-Remote-User / Remote-User)
+        1. Trusted reverse-proxy headers (X-Remote-User / Remote-User) --
+           only accepted when client_host is in trusted_proxy_ips.
         2. Session token (query param or header)
         3. Deny -- no more localhost auto-auth
 
         Args:
-            client_host: Remote IP of the connecting client (unused now,
-                kept for audit logging in callers).
+            client_host: Remote IP of the connecting client. Used to gate
+                proxy header trust and for audit logging.
             token: Session token from query params or Authorization header.
             headers: HTTP headers dict (keys should be lowercase).
 
         Returns:
             AuthResult indicating success/failure with user or reason.
         """
-        # Suppress unused-argument lint — client_host is kept for caller
-        # audit logging and future rate-limiting hooks.
-        _ = client_host
-
-        # 1. Trusted headers (reverse proxy)
-        user = headers.get("x-remote-user") or headers.get("remote-user")
-        if user and user in self._allowed_users:
-            return AuthResult(authenticated=True, user=user)
+        # 1. Trusted headers -- ONLY from trusted proxy IPs
+        if client_host and client_host in self._trusted_proxy_ips:
+            user = headers.get("x-remote-user") or headers.get("remote-user")
+            if user and user in self._allowed_users:
+                return AuthResult(authenticated=True, user=user)
 
         # 2. Session token
         if token:

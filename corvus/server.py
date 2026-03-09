@@ -27,6 +27,7 @@ from fastapi import FastAPI, WebSocket
 from corvus.api.agents import configure as configure_agents_api
 from corvus.api.agents import router as agents_router
 from corvus.api.chat import configure as configure_chat_api
+from corvus.api.chat import get_session_auth
 from corvus.api.chat import router as chat_router
 from corvus.api.control import configure as configure_control_api
 from corvus.api.control import router as control_router
@@ -132,7 +133,7 @@ configure_models_api(runtime.model_router)
 configure_memory_api(runtime.memory_hub, runtime.agents_hub)
 configure_schedules_api(runtime.scheduler)
 configure_sessions_api(runtime.session_mgr)
-configure_traces_api(runtime.session_mgr, runtime.trace_hub)
+configure_traces_api(runtime.session_mgr, runtime.trace_hub, session_auth=get_session_auth())
 configure_control_api(runtime.session_mgr, runtime.dispatch_controls, runtime.break_glass)
 
 app.include_router(agents_router)

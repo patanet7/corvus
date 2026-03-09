@@ -38,7 +38,11 @@ def _build_session_auth() -> SessionAuthManager:
     """Build SessionAuthManager from environment.
 
     Uses CORVUS_SESSION_SECRET env var (must be >= 32 bytes).
-    Falls back to os.urandom(64) for dev/testing — logs a warning.
+    Falls back to os.urandom(64) for dev/testing -- logs a warning.
+
+    CORVUS_TRUSTED_PROXY_IPS (comma-separated) controls which source
+    IPs may supply X-Remote-User / Remote-User headers.  Default empty
+    means proxy headers are never trusted.
     """
     secret_env = os.environ.get("CORVUS_SESSION_SECRET", "")
     if secret_env:
@@ -49,7 +53,18 @@ def _build_session_auth() -> SessionAuthManager:
             "Set this env var for persistent session tokens across restarts."
         )
         secret = os.urandom(64)
-    return SessionAuthManager(secret=secret, allowed_users=ALLOWED_USERS)
+
+    proxy_ips_raw = os.environ.get("CORVUS_TRUSTED_PROXY_IPS", "")
+    trusted_proxy_ips: set[str] = set()
+    if proxy_ips_raw.strip():
+        trusted_proxy_ips = {ip.strip() for ip in proxy_ips_raw.split(",") if ip.strip()}
+        logger.info("Trusted proxy IPs for header auth: %s", trusted_proxy_ips)
+
+    return SessionAuthManager(
+        secret=secret,
+        allowed_users=ALLOWED_USERS,
+        trusted_proxy_ips=trusted_proxy_ips,
+    )
 
 
 def configure(runtime: GatewayRuntime) -> None:
@@ -65,6 +80,11 @@ def _require_runtime() -> GatewayRuntime:
     if _runtime is None:
         raise HTTPException(status_code=503, detail="Gateway runtime not initialized")
     return _runtime
+
+
+def get_session_auth() -> SessionAuthManager | None:
+    """Return the module-level SessionAuthManager instance (or None)."""
+    return _session_auth
 
 
 def _require_session_auth() -> SessionAuthManager:
@@ -186,15 +206,18 @@ async def create_auth_token(request: Request):
     """
     session_auth = _require_session_auth()
     headers = {k.lower(): v for k, v in request.headers.items()}
+    client_host = request.client.host if request.client else None
 
-    # Allow token bootstrap via trusted headers
-    user = headers.get("x-remote-user") or headers.get("remote-user")
+    # Allow token bootstrap via trusted proxy headers (same IP gate as WS)
+    user: str | None = None
+    if client_host and client_host in session_auth._trusted_proxy_ips:
+        user = headers.get("x-remote-user") or headers.get("remote-user")
 
     # Allow localhost to bootstrap tokens (this is the only place
-    # localhost trust remains — the WebSocket path no longer auto-auths)
+    # localhost trust remains -- the WebSocket path no longer auto-auths).
+    # "testclient" is Starlette's in-process TestClient host, safe to include.
     if not user:
-        client_host = request.client.host if request.client else None
-        if client_host in ("127.0.0.1", "::1", "localhost"):
+        if client_host in ("127.0.0.1", "::1", "localhost", "testclient"):
             if ALLOWED_USERS:
                 user = ALLOWED_USERS[0]
 

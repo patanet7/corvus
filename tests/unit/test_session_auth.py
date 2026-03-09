@@ -18,7 +18,6 @@ import pytest
 
 from corvus.security.session_auth import AuthResult, SessionAuthManager
 
-
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
@@ -27,13 +26,18 @@ SECRET = os.urandom(64)
 ALLOWED = ["alice", "bob"]
 
 
+TRUSTED_PROXY = "10.0.0.1"
+
+
 def _make_manager(
     secret: bytes = SECRET,
     allowed_users: list[str] | None = None,
+    trusted_proxy_ips: set[str] | None = None,
 ) -> SessionAuthManager:
     return SessionAuthManager(
         secret=secret,
         allowed_users=allowed_users or ALLOWED,
+        trusted_proxy_ips=trusted_proxy_ips,
     )
 
 
@@ -121,7 +125,6 @@ class TestValidateToken:
 
     def test_expired_token_rejected(self):
         mgr = _make_manager()
-        token = mgr.create_session_token("alice", ttl_seconds=1)
         # Manually create an already-expired token
         payload = {"user": "alice", "exp": int(time.time()) - 10}
         payload_b64 = base64.urlsafe_b64encode(json.dumps(payload).encode()).decode()
@@ -174,34 +177,68 @@ class TestValidateToken:
 
 
 class TestAuthenticate:
-    def test_header_auth_accepted(self):
-        mgr = _make_manager()
+    def test_header_auth_from_trusted_proxy_accepted(self):
+        """Proxy headers accepted when client_host is in trusted_proxy_ips."""
+        mgr = _make_manager(trusted_proxy_ips={TRUSTED_PROXY})
         result = mgr.authenticate(
-            client_host="10.0.0.1",
+            client_host=TRUSTED_PROXY,
             token=None,
             headers={"x-remote-user": "alice"},
         )
         assert result.authenticated is True
         assert result.user == "alice"
 
-    def test_remote_user_header_accepted(self):
-        mgr = _make_manager()
+    def test_remote_user_header_from_trusted_proxy_accepted(self):
+        mgr = _make_manager(trusted_proxy_ips={TRUSTED_PROXY})
         result = mgr.authenticate(
-            client_host="10.0.0.1",
+            client_host=TRUSTED_PROXY,
             token=None,
             headers={"remote-user": "bob"},
         )
         assert result.authenticated is True
         assert result.user == "bob"
 
-    def test_header_with_unknown_user_denied(self):
-        mgr = _make_manager()
+    def test_header_from_untrusted_ip_ignored(self):
+        """C1: Proxy headers from an IP NOT in trusted_proxy_ips are ignored."""
+        mgr = _make_manager(trusted_proxy_ips={TRUSTED_PROXY})
+        result = mgr.authenticate(
+            client_host="192.168.99.99",
+            token=None,
+            headers={"x-remote-user": "alice"},
+        )
+        assert result.authenticated is False
+        assert result.reason == "No authentication provided"
+
+    def test_header_ignored_when_no_trusted_ips_configured(self):
+        """C1: Default (no trusted IPs) never trusts proxy headers."""
+        mgr = _make_manager()  # no trusted_proxy_ips
         result = mgr.authenticate(
             client_host="10.0.0.1",
             token=None,
+            headers={"x-remote-user": "alice"},
+        )
+        assert result.authenticated is False
+        assert result.reason == "No authentication provided"
+
+    def test_header_ignored_with_empty_trusted_ips(self):
+        """Explicitly empty set also rejects proxy headers."""
+        mgr = _make_manager(trusted_proxy_ips=set())
+        result = mgr.authenticate(
+            client_host="10.0.0.1",
+            token=None,
+            headers={"x-remote-user": "alice"},
+        )
+        assert result.authenticated is False
+        assert result.reason == "No authentication provided"
+
+    def test_header_with_unknown_user_from_trusted_proxy_denied(self):
+        mgr = _make_manager(trusted_proxy_ips={TRUSTED_PROXY})
+        result = mgr.authenticate(
+            client_host=TRUSTED_PROXY,
+            token=None,
             headers={"x-remote-user": "mallory"},
         )
-        # Falls through header check, no token, denied
+        # Falls through header check (user not in allowed), no token, denied
         assert result.authenticated is False
 
     def test_token_auth_accepted(self):
@@ -214,6 +251,18 @@ class TestAuthenticate:
         )
         assert result.authenticated is True
         assert result.user == "bob"
+
+    def test_token_fallback_when_proxy_header_from_untrusted_ip(self):
+        """Token auth still works even when spoofed proxy headers are present."""
+        mgr = _make_manager(trusted_proxy_ips={TRUSTED_PROXY})
+        token = mgr.create_session_token("bob")
+        result = mgr.authenticate(
+            client_host="192.168.99.99",  # not trusted
+            token=token,
+            headers={"x-remote-user": "alice"},  # should be ignored
+        )
+        assert result.authenticated is True
+        assert result.user == "bob"  # from token, not header
 
     def test_localhost_without_token_denied(self):
         """KEY SECURITY CHANGE: localhost no longer auto-authenticates."""
@@ -239,12 +288,12 @@ class TestAuthenticate:
         assert result.authenticated is False
         assert result.reason == "No authentication provided"
 
-    def test_header_takes_priority_over_token(self):
-        """If both header and token are present, header wins."""
-        mgr = _make_manager()
+    def test_header_takes_priority_over_token_from_trusted_proxy(self):
+        """If both header and token are present from trusted proxy, header wins."""
+        mgr = _make_manager(trusted_proxy_ips={TRUSTED_PROXY})
         token = mgr.create_session_token("bob")
         result = mgr.authenticate(
-            client_host="10.0.0.1",
+            client_host=TRUSTED_PROXY,
             token=token,
             headers={"x-remote-user": "alice"},
         )
@@ -268,6 +317,29 @@ class TestAuthenticate:
         )
         assert result.authenticated is False
         assert result.reason == "Token expired"
+
+    def test_multiple_trusted_proxies(self):
+        """Multiple IPs can be trusted."""
+        mgr = _make_manager(trusted_proxy_ips={"10.0.0.1", "10.0.0.2"})
+        for ip in ("10.0.0.1", "10.0.0.2"):
+            result = mgr.authenticate(
+                client_host=ip,
+                token=None,
+                headers={"x-remote-user": "alice"},
+            )
+            assert result.authenticated is True, f"Trusted proxy {ip} should be accepted"
+            assert result.user == "alice"
+
+    def test_none_client_host_never_trusts_headers(self):
+        """If client_host is None, proxy headers are never trusted."""
+        mgr = _make_manager(trusted_proxy_ips={TRUSTED_PROXY})
+        result = mgr.authenticate(
+            client_host=None,
+            token=None,
+            headers={"x-remote-user": "alice"},
+        )
+        assert result.authenticated is False
+        assert result.reason == "No authentication provided"
 
 
 # ---------------------------------------------------------------------------
