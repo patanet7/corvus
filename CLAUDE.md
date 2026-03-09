@@ -56,10 +56,12 @@ mise run break-glass        # Start server in break-glass mode
 
 ```
 corvus/              — Python gateway package (FastAPI + WebSocket + agents)
+corvus/security/     — Security hardening: policy engine, tokens, audit, sanitizer, rate limiter
 frontend/            — SvelteKit chat UI
-tests/               — Behavioral test suite (1790+ passing, no mocks)
+tests/               — Behavioral test suite (no mocks)
+tests/output/        — Timestamped test result logs
 scripts/             — CLI tools for agent domains (finance, paperless, etc.)
-config/              — Agent definitions, model routing, capabilities (deployment-specific)
+config/              — Agent definitions, model routing, capabilities, policy.yaml (deployment-specific)
 config.example/      — Example configs for new deployments
 mcp_servers/         — MCP server implementations (Gmail, HA)
 Dockerfile           — Multi-stage hardened build (non-root)
@@ -84,6 +86,17 @@ ARCHITECTURE.md      — Gateway architecture diagram + component docs
 - **Router Agent (Huginn)** — Intent classification and dispatch (minimal tools: sessions only)
 - **Domain Agents** — Isolated agents per domain (work, homelab, finance, docs, inbox, personal, music), each with separate workspace, sessions, and tool policies
 - **Capability Registry** — Security layer: typed tool policies, deny-wins-over-allow
+
+### Security Architecture (`corvus/security/`)
+- **PolicyEngine** (`policy.py`) — Three-tier permission model (strict/default/break_glass) from `config/policy.yaml`. Deny-wins-over-allow, global deny list always enforced.
+- **ToolContext** (`tool_context.py`) — Runtime context injected into every tool call: pre-resolved credentials, permission tier, session binding.
+- **MCPToolDef** (`mcp_tool.py`) — Tool definitions declaring credential requirements, mutation flags, typed input schemas.
+- **SessionAuthManager** (`session_auth.py`) — HMAC-SHA256 session tokens for WebSocket auth. Trusted proxy IP validation. No localhost auto-auth.
+- **AuditLog** (`audit.py`) — Append-only JSONL logging for all tool calls (allowed, denied, failed).
+- **RateLimiter** (`rate_limiter.py`) — Per-tool, per-session sliding window rate limiting.
+- **Sanitizer** (`sanitizer.py`) — Scrubs credential patterns (API keys, tokens, JWTs, connection strings) from tool results.
+- **Break-glass tokens** (`tokens.py`) — HMAC-SHA256 session-bound tokens with TTL cap (4h max).
+- **RuntimeAdapter** (`runtime_adapter.py`) — Protocol abstracting CLI-specific concerns for runtime portability.
 
 ### Memory Architecture
 - **FTS5 Backend**: SQLite full-text search with BM25 ranking, MMR diversity, temporal decay
@@ -112,9 +125,12 @@ LiteLLM handles fallbacks, retries, cooldowns, and cost tracking. `config/models
 
 ## Design Principles
 - Default-deny tooling; deny wins over allow
-- Sandbox-by-default for all tool execution
+- Sandbox-by-default for all tool execution (Darwin: `deny default` + workspace-only file access)
 - Domain isolation: separate workspaces, sessions, and auth per agent
 - All mutations require explicit approval and produce audit trails
+- Environment allowlist (not blocklist) — only explicitly safe vars pass to subprocesses
+- Purpose-built workspaces: no source code, no .env, no config, skills with SHA-256 integrity checksums
+- Tool results sanitized before reaching agent context
 - NO LAZY IMPORTS — solve the issue at module level
 - NO RELATIVE IMPORTS
 
