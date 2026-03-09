@@ -67,6 +67,10 @@ corvus/tui/
 │   ├── tools.py            # ToolScreen — tool browser, history, direct invoke
 │   └── workers.py          # WorkerScreen — subagent panel, status, output
 │
+├── panels/
+│   ├── sidebar.py          # SidebarPanel — toggleable tree panel with sections
+│   └── sections.py         # CollapsibleSection, AgentTree, WorkerTree, etc.
+│
 ├── commands/
 │   ├── registry.py         # CommandRegistry — register/lookup slash commands
 │   ├── builtins.py         # Built-in commands (/agents, /tools, /sessions, etc.)
@@ -327,6 +331,97 @@ class ChatRenderer:
 └───────────────────────────────────────────────────────┘
 ```
 
+### Pop-Out Tree Panel (Sidebar)
+
+Inspired by Harlequin's collapsible sidebar and Toad's tree+sections pattern. The sidebar is a **toggleable panel** (Ctrl+B or `/panel`) that slides in from the right, taking 25-30% of terminal width (max 45%). Contains collapsible tree sections.
+
+```
+┌─ Status ────────────────────────────────┬─────────────┐
+│ @work │ opus │ 45.1k tok               │ ▼ Agents    │
+├─────────────────────────────────────────│  work ●     │
+│                                         │  homelab    │
+│  You: fix the auth bug                  │  finance    │
+│                                         │  personal   │
+│  work: Looking at auth module...        │  docs       │
+│                                         │  inbox      │
+│  ┌─ Read("src/auth.py") ──── ▼ ──────┐ │             │
+│  │ import jwt                        │ │ ▼ Workers   │
+│  │ from datetime import datetime     │ │  └ codex    │
+│  └───────────────────────────────────┘ │    [running] │
+│                                         │  └ researcher│
+│  work: Found the issue...               │    [idle]   │
+│                                         │             │
+│                                         │ ▶ Sessions  │
+│                                         │ ▶ Memory    │
+├─────────────────────────────────────────┴─────────────┤
+│ > █                                                   │
+└───────────────────────────────────────────────────────┘
+```
+
+**Sidebar sections (collapsible with ▼/▶):**
+
+| Section | Content | Tree Structure |
+|---------|---------|---------------|
+| **Agents** | All available agents, active one marked `●` | Flat list, active highlighted |
+| **Workers** | Subagents of current agent | Tree: agent → children, with status badges |
+| **Sessions** | Recent chat sessions | Flat list, newest first, truncated preview |
+| **Memory** | Recent memory entries | Flat list, tag-grouped |
+
+**Implementation:** Rich `Tree()` for hierarchical views, `Panel()` for sections, toggle via `display: none` pattern (Harlequin). The sidebar is a `prompt_toolkit` `HSplit`/`VSplit` container that can be shown/hidden.
+
+**Keybindings:**
+- `Ctrl+B` — Toggle sidebar
+- `Ctrl+1` through `Ctrl+4` — Jump to sidebar section (agents/workers/sessions/memory)
+- `Enter` on sidebar item — activate (switch agent, enter worker, resume session)
+- `Escape` — close sidebar, return focus to chat
+
+**Module:** `corvus/tui/panels/sidebar.py`
+
+```python
+class SidebarPanel:
+    """Toggleable tree panel with collapsible sections."""
+
+    visible: bool = False
+    sections: list[CollapsibleSection]
+
+    def toggle(self) -> None:
+        """Show/hide sidebar."""
+        self.visible = not self.visible
+
+    def render(self) -> Panel:
+        """Render all sections into a Rich Panel."""
+        ...
+
+class CollapsibleSection:
+    """A sidebar section with ▼/▶ toggle."""
+    title: str
+    expanded: bool
+    items: list[SidebarItem]
+
+    def toggle(self) -> None:
+        self.expanded = not self.expanded
+
+    def render_tree(self) -> Tree:
+        """Render items as a Rich Tree."""
+        ...
+
+class AgentTreeSection(CollapsibleSection):
+    """Shows all agents with active marker."""
+    ...
+
+class WorkerTreeSection(CollapsibleSection):
+    """Shows subagent hierarchy with status badges."""
+    ...
+
+class SessionListSection(CollapsibleSection):
+    """Shows recent sessions with previews."""
+    ...
+
+class MemoryListSection(CollapsibleSection):
+    """Shows recent memories grouped by tag."""
+    ...
+```
+
 ---
 
 ## Input Parsing
@@ -429,6 +524,7 @@ class CommandRegistry:
 /status                  System status
 /focus                   Toggle focus mode
 /split                   Toggle split mode
+/panel                   Toggle sidebar tree panel
 /export                  Export session to markdown
 /theme <name>            Switch color theme
 ```
@@ -519,8 +615,12 @@ prompt_toolkit completions trigger on:
 | `Ctrl+L` | Clear screen |
 | `Ctrl+R` | Search history |
 | `Ctrl+P` / `Ctrl+N` | Previous/next in history |
-| `Ctrl+B` | Toggle worker panel |
+| `Ctrl+B` | Toggle sidebar panel |
 | `Ctrl+T` | Toggle split mode |
+| `Ctrl+1` | Jump to Agents section (sidebar) |
+| `Ctrl+2` | Jump to Workers section (sidebar) |
+| `Ctrl+3` | Jump to Sessions section (sidebar) |
+| `Ctrl+4` | Jump to Memory section (sidebar) |
 | `Escape` | `/back` (pop agent stack) |
 | `Tab` | Accept completion |
 | `F1` | Help |
