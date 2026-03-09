@@ -1,0 +1,66 @@
+........................................................................ [  4%]
+........................................................................ [  9%]
+.....................................................F
+=================================== FAILURES ===================================
+___________________ TestMCPToolDef.test_base_execute_raises ____________________
+
+self = <test_mcp_tool_handler.TestMCPToolDef object at 0x106f01be0>
+
+    def test_base_execute_raises(self):
+        tool = MCPToolDef(name="test", description="test")
+        with pytest.raises(NotImplementedError, match="test"):
+>           asyncio.get_event_loop().run_until_complete(
+            ^^^^^^^^^^^^^^^^^^^^^^^^
+                tool.execute(
+                    ToolContext(
+                        agent_name="test",
+                        session_id="s1",
+                        permission_tier=PermissionTier.DEFAULT,
+                        credentials={},
+                        permissions=ToolPermissions(),
+                    )
+                )
+            )
+
+tests/unit/test_mcp_tool_handler.py:27: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <asyncio.unix_events._UnixDefaultEventLoopPolicy object at 0x1078cbaa0>
+
+    def get_event_loop(self):
+        """Get the event loop for the current context.
+    
+        Returns an instance of EventLoop or raises an exception.
+        """
+        if (self._local._loop is None and
+                not self._local._set_called and
+                threading.current_thread() is threading.main_thread()):
+            stacklevel = 2
+            try:
+                f = sys._getframe(1)
+            except AttributeError:
+                pass
+            else:
+                # Move up the call stack so that the warning is attached
+                # to the line outside asyncio itself.
+                while f:
+                    module = f.f_globals.get('__name__')
+                    if not (module == 'asyncio' or module.startswith('asyncio.')):
+                        break
+                    f = f.f_back
+                    stacklevel += 1
+            import warnings
+            warnings.warn('There is no current event loop',
+                          DeprecationWarning, stacklevel=stacklevel)
+            self.set_event_loop(self.new_event_loop())
+    
+        if self._local._loop is None:
+>           raise RuntimeError('There is no current event loop in thread %r.'
+                               % threading.current_thread().name)
+E           RuntimeError: There is no current event loop in thread 'MainThread'.
+
+../../../../../miniconda3/lib/python3.12/asyncio/events.py:702: RuntimeError
+=========================== short test summary info ============================
+FAILED tests/unit/test_mcp_tool_handler.py::TestMCPToolDef::test_base_execute_raises
+!!!!!!!!!!!!!!!!!!!!!!!!!! stopping after 1 failures !!!!!!!!!!!!!!!!!!!!!!!!!!!
+1 failed, 197 passed in 3.95s
