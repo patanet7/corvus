@@ -200,7 +200,22 @@ async def create_memory_record(request: Request, user: str = Depends(get_user)):
     domain_raw = body.get("domain")
     domain = own_domain
     if isinstance(domain_raw, str) and domain_raw.strip():
-        domain = domain_raw.strip()
+        requested_domain = domain_raw.strip()
+        # SEC-009: If an agent was explicitly provided, enforce that the
+        # requested domain matches the agent's own_domain.  This prevents
+        # cross-domain writes where e.g. the "personal" agent tries to
+        # write into the "work" domain.
+        if body.get("agent") and requested_domain != own_domain:
+            return JSONResponse(
+                {
+                    "error": (
+                        f"Domain mismatch: agent '{agent_name}' owns domain "
+                        f"'{own_domain}' but request targets '{requested_domain}'"
+                    )
+                },
+                status_code=403,
+            )
+        domain = requested_domain
 
     record = MemoryRecord(
         id=str(uuid4()),
