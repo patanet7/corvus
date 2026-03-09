@@ -99,14 +99,26 @@ class InProcessGateway(GatewayProtocol):
         dispatch_id = str(uuid.uuid4())
         session.current_turn_id = turn_id
 
-        dispatch_resolution, dispatch_error = await resolve_chat_dispatch(
-            runtime=self._runtime,
-            user_message=text,
-            requested_agent=None,
-            requested_agents=None,
-            requested_model=None,
-            dispatch_mode_raw=None,
-        )
+        try:
+            dispatch_resolution, dispatch_error = await resolve_chat_dispatch(
+                runtime=self._runtime,
+                user_message=text,
+                requested_agent=None,
+                requested_agents=None,
+                requested_model=None,
+                dispatch_mode_raw=None,
+            )
+        except Exception as exc:
+            logger.exception("Dispatch resolution failed")
+            if callback is not None:
+                error_event = parse_event({
+                    "type": "error",
+                    "error": type(exc).__name__,
+                    "message": str(exc),
+                })
+                await callback(error_event)
+            session.current_turn_id = None
+            return
 
         if dispatch_error:
             if callback is not None:
@@ -120,14 +132,24 @@ class InProcessGateway(GatewayProtocol):
             return
 
         assert dispatch_resolution is not None
-        await session._execute_dispatch_lifecycle(
-            dispatch_id=dispatch_id,
-            turn_id=turn_id,
-            resolution=dispatch_resolution,
-            user_message=text,
-            user_model=None,
-            requires_tools=False,
-        )
+        try:
+            await session._execute_dispatch_lifecycle(
+                dispatch_id=dispatch_id,
+                turn_id=turn_id,
+                resolution=dispatch_resolution,
+                user_message=text,
+                user_model=None,
+                requires_tools=False,
+            )
+        except Exception as exc:
+            logger.exception("Dispatch execution failed")
+            if callback is not None:
+                error_event = parse_event({
+                    "type": "error",
+                    "error": type(exc).__name__,
+                    "message": str(exc),
+                })
+                await callback(error_event)
 
     # ------------------------------------------------------------------
     # Confirmation / cancellation

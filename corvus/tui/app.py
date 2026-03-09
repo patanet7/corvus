@@ -30,7 +30,7 @@ class TuiApp:
 
     def __init__(self) -> None:
         self.theme = TuiTheme()
-        self.console = Console()
+        self.console = Console(force_terminal=True)
         self.renderer = ChatRenderer(self.console, self.theme)
         self.agent_stack = AgentStack()
         self.command_registry = CommandRegistry()
@@ -215,7 +215,10 @@ class TuiApp:
         else:
             self.renderer.render_user_message(text, "corvus")
 
-        await self.gateway.send_message(text)
+        try:
+            await self.gateway.send_message(text)
+        except Exception as exc:
+            self.renderer.render_error(f"Gateway error: {exc}")
 
     # ------------------------------------------------------------------
     # Main loop
