@@ -18,6 +18,7 @@ from corvus.tui.core.session import TuiSessionManager
 from corvus.tui.input.completer import ChatCompleter
 from corvus.tui.input.parser import InputParser, ParsedInput
 from corvus.tui.output.renderer import ChatRenderer
+from corvus.tui.output.status_bar import StatusBar
 from corvus.tui.output.token_counter import TokenCounter
 from corvus.tui.protocol.in_process import InProcessGateway
 from corvus.tui.theme import TuiTheme
@@ -45,6 +46,7 @@ class TuiApp:
         self.event_handler = EventHandler(self.renderer, self.agent_stack, self.token_counter)
         self.gateway = InProcessGateway()
         self.completer = ChatCompleter(self.command_registry)
+        self.status_bar = StatusBar(self.agent_stack, self.token_counter, self.theme)
         self.session_manager = TuiSessionManager(self.gateway, self.agent_stack)
 
         self._register_builtin_commands()
@@ -105,18 +107,16 @@ class TuiApp:
     # ------------------------------------------------------------------
 
     def _build_prompt(self) -> HTML:
-        """Build the prompt with agent path and token count."""
-        tokens = self.token_counter.format_display()
-
+        """Build the prompt with agent path (token count is in the status bar)."""
         if self.agent_stack.depth == 0:
-            return HTML(f"<b>corvus</b> <i>[{tokens}]</i>&gt; ")
+            return HTML("<b>corvus</b>&gt; ")
 
         agent = self.agent_stack.current.agent_name
         if self.agent_stack.depth == 1:
-            return HTML(f"<b>@{agent}</b> <i>[{tokens}]</i>&gt; ")
+            return HTML(f"<b>@{agent}</b>&gt; ")
 
         breadcrumb = self.agent_stack.breadcrumb
-        return HTML(f"<b>{breadcrumb}</b> <i>[{tokens}]</i>&gt; ")
+        return HTML(f"<b>{breadcrumb}</b>&gt; ")
 
     # ------------------------------------------------------------------
     # Command handlers
@@ -303,7 +303,7 @@ class TuiApp:
             while True:
                 try:
                     prompt = self._build_prompt()
-                    raw = await session.prompt_async(prompt)
+                    raw = await session.prompt_async(prompt, bottom_toolbar=self.status_bar)
                 except EOFError:
                     break
                 except KeyboardInterrupt:
