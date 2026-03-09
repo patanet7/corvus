@@ -117,6 +117,7 @@ class TestCreateWorkspace:
         assert all_files == [
             ".claude/CLAUDE.md",
             ".claude/settings.json",
+            ".claude/skill_checksums.json",
             "skills/hello.md",
         ]
 

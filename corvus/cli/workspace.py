@@ -11,6 +11,8 @@ Uses tempfile.mkdtemp() with 0o700 permissions to prevent symlink attacks.
 
 from __future__ import annotations
 
+import hashlib
+import json
 import logging
 import os
 import shutil
@@ -62,11 +64,77 @@ def create_workspace(
         for filename, content in skills.items():
             (skills_dir / filename).write_text(content, encoding="utf-8")
 
+        # Compute and store skill checksums for integrity verification
+        checksums = compute_skill_checksums(skills)
+        checksum_path = claude_dir / "skill_checksums.json"
+        checksum_path.write_text(
+            json.dumps(checksums, indent=2, sort_keys=True), encoding="utf-8"
+        )
+
     logger.info(
         "Created workspace for %s at %s (session=%s)",
         agent_name, workspace, session_id,
     )
     return workspace
+
+
+def compute_skill_checksums(skills: dict[str, str]) -> dict[str, str]:
+    """Compute SHA-256 checksums for skill file contents.
+
+    Args:
+        skills: Dict of {filename: content} for skill files.
+
+    Returns:
+        Dict of {filename: sha256_hex_digest}.
+    """
+    checksums: dict[str, str] = {}
+    for filename, content in skills.items():
+        digest = hashlib.sha256(content.encode("utf-8")).hexdigest()
+        checksums[filename] = digest
+    return checksums
+
+
+def verify_skill_integrity(
+    workspace: Path, checksums: dict[str, str]
+) -> list[str]:
+    """Verify skill files in a workspace match expected checksums.
+
+    Reads each skill file from workspace/skills/, computes SHA-256,
+    and compares against the expected checksums. Also detects extra
+    files not present in the checksums dict.
+
+    Args:
+        workspace: Path to the workspace root directory.
+        checksums: Expected {filename: sha256_hex_digest} mapping.
+
+    Returns:
+        List of violation descriptions (empty = all OK).
+    """
+    violations: list[str] = []
+    skills_dir = workspace / "skills"
+
+    # Check each expected file
+    for filename, expected_hash in checksums.items():
+        skill_path = skills_dir / filename
+        if not skill_path.is_file():
+            violations.append(f"Missing skill file: {filename}")
+            continue
+        actual_hash = hashlib.sha256(
+            skill_path.read_bytes()
+        ).hexdigest()
+        if actual_hash != expected_hash:
+            violations.append(
+                f"Skill file tampered: {filename} "
+                f"(expected {expected_hash[:16]}..., got {actual_hash[:16]}...)"
+            )
+
+    # Check for extra files not in checksums
+    if skills_dir.is_dir():
+        for item in skills_dir.iterdir():
+            if item.is_file() and item.name not in checksums:
+                violations.append(f"Unexpected skill file: {item.name}")
+
+    return violations
 
 
 def cleanup_workspace(workspace: Path) -> None:
