@@ -15,7 +15,7 @@ from dataclasses import dataclass, field
 _MENTION_RE = re.compile(r"@(\w+)")
 
 
-@dataclass(slots=True)
+@dataclass
 class ParsedInput:
     """Result of parsing a single line of user input."""
 
@@ -27,6 +27,17 @@ class ParsedInput:
     tool_name: str | None = None
     tool_args: str | None = None
     mentions: list[str] = field(default_factory=list)
+
+    @property
+    def tool_params(self) -> dict | None:
+        """Return tool arguments as a dict, or None if no tool args.
+
+        Provides a structured accessor while keeping ``tool_args`` for
+        backward compatibility.
+        """
+        if self.tool_args is None:
+            return None
+        return {"raw": self.tool_args}
 
 
 class InputParser:

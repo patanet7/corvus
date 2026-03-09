@@ -14,6 +14,7 @@ from corvus.tui.protocol.events import (
     ConfirmRequest,
     DispatchComplete,
     DispatchPlan,
+    DispatchStart,
     ErrorEvent,
     ProtocolEvent,
     RateLimitEvent,
@@ -68,7 +69,9 @@ class EventHandler:
 
     async def handle(self, event: ProtocolEvent) -> None:
         """Dispatch a protocol event to the appropriate handler method."""
-        if isinstance(event, RunStart):
+        if isinstance(event, DispatchStart):
+            self._handle_dispatch_start(event)
+        elif isinstance(event, RunStart):
             self._handle_run_start(event)
         elif isinstance(event, RunPhase):
             self._handle_run_phase(event)
@@ -90,6 +93,11 @@ class EventHandler:
             self._handle_error(event)
         elif isinstance(event, DispatchComplete):
             self._handle_dispatch_complete(event)
+
+    def _handle_dispatch_start(self, event: ProtocolEvent) -> None:
+        """Render a system message when dispatch begins."""
+        agent = getattr(event, "agent", None) or event.raw.get("agent") or "unknown"
+        self._renderer.render_system(f"Dispatching to @{agent}...")
 
     def _handle_run_start(self, event: RunStart) -> None:
         """Set agent to THINKING and start the thinking spinner."""

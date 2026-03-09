@@ -33,6 +33,7 @@ class AgentContext:
     token_count: int = 0
     status: AgentStatus = AgentStatus.IDLE
     status_detail: str = ""
+    display_name: str = ""
 
 
 class AgentStack:

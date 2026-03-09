@@ -16,8 +16,6 @@ import asyncio
 import os
 import tempfile
 from io import StringIO
-from unittest.mock import AsyncMock
-
 import pytest
 from rich.console import Console
 

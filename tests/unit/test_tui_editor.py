@@ -1,6 +1,6 @@
 """Behavioral tests for corvus.tui.input.editor.ChatEditor.
 
-No mocks — exercises real prompt_toolkit objects and verifies
+No mocks -- exercises real prompt_toolkit objects and verifies
 observable properties and binding registrations.
 """
 
@@ -19,6 +19,11 @@ class _StubCompleter(Completer):
         yield Completion("hello", start_position=0)
 
 
+def _make_editor(multiline: bool = False) -> ChatEditor:
+    """Helper to build a ChatEditor for keybinding tests."""
+    return ChatEditor(completer=_StubCompleter(), multiline=multiline)
+
+
 # ------------------------------------------------------------------
 # _build_keybindings
 # ------------------------------------------------------------------
@@ -28,7 +33,8 @@ class TestBuildKeybindings:
     """Tests for the _build_keybindings helper."""
 
     def test_single_line_has_ctrl_c_and_ctrl_d(self) -> None:
-        kb = _build_keybindings(multiline=False)
+        editor = _make_editor(multiline=False)
+        kb = _build_keybindings(multiline=False, editor=editor)
         bound_keys = {
             tuple(b.keys) for b in kb.bindings
         }
@@ -36,7 +42,8 @@ class TestBuildKeybindings:
         assert (Keys.ControlD,) in bound_keys
 
     def test_single_line_does_not_bind_enter(self) -> None:
-        kb = _build_keybindings(multiline=False)
+        editor = _make_editor(multiline=False)
+        kb = _build_keybindings(multiline=False, editor=editor)
         bound_keys = {
             tuple(b.keys) for b in kb.bindings
         }
@@ -44,7 +51,8 @@ class TestBuildKeybindings:
         assert (Keys.Enter,) not in bound_keys
 
     def test_multiline_binds_enter_and_submit_keys(self) -> None:
-        kb = _build_keybindings(multiline=True)
+        editor = _make_editor(multiline=True)
+        kb = _build_keybindings(multiline=True, editor=editor)
         bound_keys = {
             tuple(b.keys) for b in kb.bindings
         }
@@ -56,7 +64,8 @@ class TestBuildKeybindings:
         assert (Keys.ControlJ,) in bound_keys
 
     def test_multiline_still_has_ctrl_c_and_ctrl_d(self) -> None:
-        kb = _build_keybindings(multiline=True)
+        editor = _make_editor(multiline=True)
+        kb = _build_keybindings(multiline=True, editor=editor)
         bound_keys = {
             tuple(b.keys) for b in kb.bindings
         }
@@ -64,14 +73,26 @@ class TestBuildKeybindings:
         assert (Keys.ControlD,) in bound_keys
 
     def test_single_line_binding_count(self) -> None:
-        kb = _build_keybindings(multiline=False)
-        # Ctrl+C + Ctrl+D = 2 bindings
-        assert len(kb.bindings) == 2
+        editor = _make_editor(multiline=False)
+        kb = _build_keybindings(multiline=False, editor=editor)
+        # Ctrl+C + Ctrl+D + Ctrl+L + Ctrl+B + Ctrl+T + Escape = 6 bindings
+        assert len(kb.bindings) == 6
 
     def test_multiline_binding_count(self) -> None:
-        kb = _build_keybindings(multiline=True)
-        # Ctrl+C + Ctrl+D + Enter + Meta+Enter + Ctrl+J = 5 bindings
-        assert len(kb.bindings) == 5
+        editor = _make_editor(multiline=True)
+        kb = _build_keybindings(multiline=True, editor=editor)
+        # Ctrl+C + Ctrl+D + Ctrl+L + Ctrl+B + Ctrl+T + Escape + Enter + Meta+Enter + Ctrl+J = 9
+        assert len(kb.bindings) == 9
+
+    def test_new_keybindings_present(self) -> None:
+        """Verify Ctrl+L, Ctrl+B, Ctrl+T, and Escape are bound."""
+        editor = _make_editor(multiline=False)
+        kb = _build_keybindings(multiline=False, editor=editor)
+        bound_keys = {tuple(b.keys) for b in kb.bindings}
+        assert (Keys.ControlL,) in bound_keys
+        assert (Keys.ControlB,) in bound_keys
+        assert (Keys.ControlT,) in bound_keys
+        assert (Keys.Escape,) in bound_keys
 
 
 # ------------------------------------------------------------------
@@ -114,6 +135,45 @@ class TestChatEditorConstruction:
         editor = ChatEditor(completer=_StubCompleter())
         # The session's key_bindings should be the same object we built
         assert editor.session.key_bindings is editor.key_bindings
+
+    def test_callbacks_default_to_none(self) -> None:
+        editor = ChatEditor(completer=_StubCompleter())
+        assert editor._clear_callback is None
+        assert editor._sidebar_callback is None
+        assert editor._split_callback is None
+        assert editor._back_callback is None
+
+    def test_set_clear_callback(self) -> None:
+        editor = ChatEditor(completer=_StubCompleter())
+        called = []
+        editor.set_clear_callback(lambda: called.append("clear"))
+        assert editor._clear_callback is not None
+        editor._clear_callback()
+        assert called == ["clear"]
+
+    def test_set_sidebar_callback(self) -> None:
+        editor = ChatEditor(completer=_StubCompleter())
+        called = []
+        editor.set_sidebar_callback(lambda: called.append("sidebar"))
+        assert editor._sidebar_callback is not None
+        editor._sidebar_callback()
+        assert called == ["sidebar"]
+
+    def test_set_split_callback(self) -> None:
+        editor = ChatEditor(completer=_StubCompleter())
+        called = []
+        editor.set_split_callback(lambda: called.append("split"))
+        assert editor._split_callback is not None
+        editor._split_callback()
+        assert called == ["split"]
+
+    def test_set_back_callback(self) -> None:
+        editor = ChatEditor(completer=_StubCompleter())
+        called = []
+        editor.set_back_callback(lambda: called.append("back"))
+        assert editor._back_callback is not None
+        editor._back_callback()
+        assert called == ["back"]
 
 
 # ------------------------------------------------------------------

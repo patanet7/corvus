@@ -1,5 +1,7 @@
 """StatusBar — bottom toolbar content for the prompt_toolkit prompt."""
 
+import time
+
 from prompt_toolkit.formatted_text import HTML
 
 from corvus.tui.core.agent_stack import AgentStack
@@ -28,6 +30,7 @@ class StatusBar:
         self._theme = theme
         self._model: str = "default"
         self._tier: str | None = None
+        self._breakglass_expiry: float | None = None
 
     @property
     def model(self) -> str:
@@ -49,6 +52,14 @@ class StatusBar:
         """Set the current permission tier."""
         self._tier = value
 
+    def set_breakglass_expiry(self, expiry: float | None) -> None:
+        """Store the break-glass expiry timestamp (epoch seconds).
+
+        When set and the tier is BREAK-GLASS, the toolbar will show
+        remaining minutes.
+        """
+        self._breakglass_expiry = expiry
+
     def __call__(self) -> HTML:
         """Called by prompt_toolkit to render the toolbar."""
         parts: list[str] = []
@@ -69,9 +80,14 @@ class StatusBar:
             if workers:
                 parts.append(f"workers: {workers}" if workers != 1 else "workers: 1")
 
-        # Permission tier
+        # Permission tier (with break-glass countdown)
         if self._tier is not None:
-            parts.append(self._tier)
+            if self._tier == "BREAK-GLASS" and self._breakglass_expiry is not None:
+                remaining = max(0, self._breakglass_expiry - time.time())
+                mins = int(remaining // 60)
+                parts.append(f"BREAK-GLASS [{mins}m remaining]")
+            else:
+                parts.append(self._tier)
 
         # Token count
         parts.append(self._token_counter.format_display())

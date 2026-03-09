@@ -9,7 +9,13 @@ from rich.panel import Panel
 from rich.text import Text
 
 from corvus.tui.core.agent_stack import AgentStack
-from corvus.tui.panels.sections import AgentTreeSection, CollapsibleSection, ToolListSection
+from corvus.tui.panels.sections import (
+    AgentTreeSection,
+    CollapsibleSection,
+    SessionListSection,
+    ToolListSection,
+    WorkerTreeSection,
+)
 from corvus.tui.theme import TuiTheme
 
 
@@ -35,8 +41,12 @@ class SidebarPanel:
 
         self._agent_section = CollapsibleSection("Agents", theme)
         self._tool_section = CollapsibleSection("Tools", theme)
+        self._worker_section = CollapsibleSection("Workers", theme)
+        self._session_section = CollapsibleSection("Sessions", theme)
         self._agent_tree = AgentTreeSection(agent_stack, theme)
         self._tool_list = ToolListSection(theme)
+        self._worker_tree = WorkerTreeSection(agent_stack, theme)
+        self._session_list = SessionListSection(theme)
 
     @property
     def visible(self) -> bool:
@@ -61,10 +71,18 @@ class SidebarPanel:
             self._agent_section.toggle()
         elif section_name == "tools":
             self._tool_section.toggle()
+        elif section_name == "workers":
+            self._worker_section.toggle()
+        elif section_name == "sessions":
+            self._session_section.toggle()
 
     def set_tools(self, tools: list[dict]) -> None:
         """Update the tool list for the tools section."""
         self._tool_list.set_tools(tools)
+
+    def set_sessions(self, sessions: list[dict]) -> None:
+        """Update the session list for the sessions section."""
+        self._session_list.set_sessions(sessions)
 
     def render(self) -> ConsoleRenderable:
         """Render the sidebar as a panel with collapsible sections."""
@@ -78,6 +96,12 @@ class SidebarPanel:
 
         tool_content = self._tool_list.render()
         parts.append(self._tool_section.render(tool_content))
+
+        worker_content = self._worker_tree.render()
+        parts.append(self._worker_section.render(worker_content))
+
+        session_content = self._session_list.render()
+        parts.append(self._session_section.render(session_content))
 
         return Panel(
             Group(*parts),

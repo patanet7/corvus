@@ -15,7 +15,14 @@ from corvus.tui.core.event_handler import EventHandler
 from corvus.tui.output.renderer import ChatRenderer
 from corvus.tui.output.token_counter import TokenCounter
 from corvus.tui.protocol.events import (
+    ConfirmRequest,
+    ConfirmResponse,
+    DispatchComplete,
+    DispatchStart,
+    ErrorEvent,
+    ProtocolEvent,
     RateLimitEvent,
+    RunPhase,
     ToolResult,
     ToolStart,
     parse_event,
@@ -894,3 +901,175 @@ class TestCostTrackingThroughEvents:
         }))
 
         assert counter.session_cost == 0.0
+
+
+# ===========================================================================
+# 14. Auto-approve flow — Task I13
+# ===========================================================================
+
+class TestAutoApproveFlow:
+    """EventHandler auto-approve callbacks skip the user prompt for allowed tools."""
+
+    def test_set_auto_approve(self) -> None:
+        """set_auto_approve stores the check and confirm callbacks."""
+        handler, stack, buf, _ = _make_stack_renderer()
+
+        approved_calls: list[tuple[str, str]] = []
+
+        def check_fn(tool: str) -> bool:
+            return tool == "Bash"
+
+        def confirm_fn(tool_id: str, action: str) -> None:
+            approved_calls.append((tool_id, action))
+
+        handler.set_auto_approve(check_fn, confirm_fn)
+        assert handler._auto_approve_check is not None
+        assert handler._auto_approve_confirm is not None
+
+    @pytest.mark.asyncio
+    async def test_auto_approve_confirms_automatically(self) -> None:
+        """When auto_approve check returns True, handler auto-responds without prompting."""
+        handler, stack, buf, _ = _make_stack_renderer()
+
+        approved_calls: list[tuple[str, str]] = []
+
+        def check_fn(tool: str) -> bool:
+            return tool == "Bash"
+
+        def confirm_fn(tool_id: str, action: str) -> None:
+            approved_calls.append((tool_id, action))
+
+        handler.set_auto_approve(check_fn, confirm_fn)
+
+        await handler.handle(parse_event({
+            "type": "confirm_request",
+            "tool": "Bash",
+            "tool_id": "tid-auto",
+            "agent": "homelab",
+            "input": {"command": "ls"},
+        }))
+
+        # Should have auto-approved, not stored pending
+        assert handler.pending_confirm is None
+        assert len(approved_calls) == 1
+        assert approved_calls[0] == ("tid-auto", "approve")
+
+    @pytest.mark.asyncio
+    async def test_auto_approve_false_prompts(self) -> None:
+        """When auto_approve check returns False, handler stores pending and renders prompt."""
+        handler, stack, buf, _ = _make_stack_renderer()
+
+        approved_calls: list[tuple[str, str]] = []
+
+        def check_fn(tool: str) -> bool:
+            return tool == "Bash"  # Only Bash is auto-approved
+
+        def confirm_fn(tool_id: str, action: str) -> None:
+            approved_calls.append((tool_id, action))
+
+        handler.set_auto_approve(check_fn, confirm_fn)
+
+        await handler.handle(parse_event({
+            "type": "confirm_request",
+            "tool": "Write",
+            "tool_id": "tid-manual",
+            "agent": "homelab",
+            "input": {"path": "/etc/config"},
+        }))
+
+        # Should NOT have auto-approved — Write is not in the allow list
+        assert len(approved_calls) == 0
+        assert handler.pending_confirm is not None
+        assert handler.pending_confirm.tool_id == "tid-manual"
+        assert handler.pending_confirm.tool == "Write"
+
+        output = _output(buf)
+        assert "Write" in output
+
+
+# ===========================================================================
+# 15. Event type parse round-trips — Task I14
+# ===========================================================================
+
+class TestEventParseRoundTrips:
+    """parse_event correctly maps raw dicts to typed dataclass instances."""
+
+    def test_parse_dispatch_start(self) -> None:
+        raw = {
+            "type": "dispatch_start",
+            "dispatch_id": "d-001",
+            "session_id": "s-001",
+            "turn_id": "t-001",
+        }
+        event = parse_event(raw)
+        assert isinstance(event, DispatchStart)
+        assert event.dispatch_id == "d-001"
+        assert event.session_id == "s-001"
+        assert event.turn_id == "t-001"
+        assert event.raw == raw
+
+    def test_parse_dispatch_complete(self) -> None:
+        raw = {
+            "type": "dispatch_complete",
+            "dispatch_id": "d-002",
+            "session_id": "s-002",
+            "turn_id": "t-002",
+            "result": "success",
+            "summary": "All tasks done",
+        }
+        event = parse_event(raw)
+        assert isinstance(event, DispatchComplete)
+        assert event.dispatch_id == "d-002"
+        assert event.result == "success"
+        assert event.summary == "All tasks done"
+
+    def test_parse_run_phase(self) -> None:
+        raw = {
+            "type": "run_phase",
+            "run_id": "r-001",
+            "agent": "homelab",
+            "phase": "executing",
+            "summary": "Running tool calls",
+        }
+        event = parse_event(raw)
+        assert isinstance(event, RunPhase)
+        assert event.run_id == "r-001"
+        assert event.agent == "homelab"
+        assert event.phase == "executing"
+        assert event.summary == "Running tool calls"
+
+    def test_parse_confirm_response(self) -> None:
+        raw = {
+            "type": "confirm_response",
+            "tool_id": "tid-99",
+            "run_id": "r-099",
+            "approved": True,
+        }
+        event = parse_event(raw)
+        assert isinstance(event, ConfirmResponse)
+        assert event.tool_id == "tid-99"
+        assert event.run_id == "r-099"
+        assert event.approved is True
+
+    def test_parse_error_event(self) -> None:
+        raw = {
+            "type": "error",
+            "message": "Connection lost",
+            "code": "E_CONN",
+            "agent": "finance",
+        }
+        event = parse_event(raw)
+        assert isinstance(event, ErrorEvent)
+        assert event.message == "Connection lost"
+        assert event.code == "E_CONN"
+        assert event.agent == "finance"
+
+    def test_parse_unknown_event_type(self) -> None:
+        raw = {
+            "type": "totally_unknown",
+            "some_field": "some_value",
+        }
+        event = parse_event(raw)
+        assert type(event) is ProtocolEvent
+        assert event.type == "totally_unknown"
+        assert event.raw == raw

@@ -781,13 +781,13 @@ class TestChatSessionExecuteAgentRun:
         assert ri_param.kind == inspect.Parameter.KEYWORD_ONLY
 
     def test_execute_agent_run_asserts_active_turn_context(self, session) -> None:
-        """Calling execute_agent_run without a TurnContext raises AssertionError."""
+        """Calling execute_agent_run without a TurnContext raises RuntimeError."""
         route = TaskRoute(
             agent="general",
             prompt="hello",
             requested_model=None,
         )
-        with pytest.raises(AssertionError, match="requires an active TurnContext"):
+        with pytest.raises(RuntimeError, match="requires an active TurnContext"):
             asyncio.run(session.execute_agent_run(route, route_index=0))
 
     def test_route_payload_static_method(self) -> None:
@@ -835,7 +835,7 @@ class TestDispatchControlListener:
     def test_dispatch_control_listener_asserts_active_turn_context(self, tmp_path) -> None:
         """Calling dispatch_control_listener without a TurnContext raises AssertionError."""
         _, session = _make_session(tmp_path)
-        with pytest.raises(AssertionError, match="requires an active TurnContext"):
+        with pytest.raises(RuntimeError, match="requires an active TurnContext"):
             asyncio.run(session.dispatch_control_listener())
 
     def test_dispatch_control_listener_asserts_active_websocket(self, tmp_path) -> None:
@@ -849,7 +849,7 @@ class TestDispatchControlListener:
             user_model=None,
             requires_tools=False,
         )
-        with pytest.raises(AssertionError, match="requires an active WebSocket"):
+        with pytest.raises(RuntimeError, match="requires an active WebSocket"):
             asyncio.run(session.dispatch_control_listener())
 
 
@@ -876,7 +876,7 @@ class TestChatSessionRun:
     def test_run_asserts_active_websocket(self, tmp_path) -> None:
         """Calling run() without a WebSocket raises AssertionError."""
         _, session = _make_session(tmp_path)
-        with pytest.raises(AssertionError, match="requires an active WebSocket"):
+        with pytest.raises(RuntimeError, match="requires an active WebSocket"):
             asyncio.run(session.run(started_at=datetime.now(UTC)))
 
 
@@ -893,5 +893,5 @@ class TestDegradedMessageLoop:
     def test_degraded_message_loop_asserts_active_websocket(self, tmp_path) -> None:
         """Calling _degraded_message_loop without a WebSocket raises AssertionError."""
         _, session = _make_session(tmp_path)
-        with pytest.raises(AssertionError, match="requires an active WebSocket"):
+        with pytest.raises(RuntimeError, match="requires an active WebSocket"):
             asyncio.run(session._degraded_message_loop())

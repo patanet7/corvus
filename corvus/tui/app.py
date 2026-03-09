@@ -2,6 +2,7 @@
 
 import argparse
 import asyncio
+import html
 import logging
 import os
 from pathlib import Path
@@ -15,7 +16,14 @@ load_dotenv()
 
 from corvus.security.audit import AuditLog
 from corvus.security.policy import PolicyEngine
-from corvus.tui.commands.builtins import ServiceCommandHandler, SystemCommandHandler
+from corvus.tui.commands.builtins import (
+    ServiceCommandHandler,
+    SystemCommandHandler,
+    _detect_language,
+)
+from corvus.tui.core.credentials import _get_credential_status
+from corvus.tui.commands.domain import AgentCommandHandler
+from corvus.tui.protocol.base import GatewayProtocol
 from corvus.tui.commands.registry import CommandRegistry, InputTier, SlashCommand
 from corvus.tui.core.agent_stack import AgentStack, AgentStatus
 from corvus.tui.core.command_router import CommandRouter
@@ -23,6 +31,7 @@ from corvus.tui.core.event_handler import EventHandler
 from corvus.tui.core.session import TuiSessionManager
 from corvus.tui.core.split_manager import SplitManager
 from corvus.tui.input.completer import ChatCompleter
+from corvus.tui.input.editor import ChatEditor
 from corvus.tui.input.parser import InputParser, ParsedInput
 from corvus.tui.output.renderer import ChatRenderer
 from corvus.tui.output.status_bar import StatusBar
@@ -58,12 +67,17 @@ class TuiApp:
         self.session_manager = TuiSessionManager(self.gateway, self.agent_stack)
         self._always_allow: set[str] = set()
         self.split_manager = SplitManager()
+        self._editor = ChatEditor(completer=self.completer)
+        self._editor.set_clear_callback(lambda: self.console.clear())
+        self._editor.set_sidebar_callback(
+            lambda: self._sidebar.toggle() if hasattr(self, "_sidebar") else None
+        )
 
         # Audit log — only initialised when CORVUS_AUDIT_LOG is set or logs/ exists
         audit_path = os.environ.get("CORVUS_AUDIT_LOG", "")
         if not audit_path and os.path.isdir("logs"):
             audit_path = "logs/audit.jsonl"
-        _audit_log: AuditLog | None = AuditLog(Path(audit_path)) if audit_path else None
+        audit_log_inst: AuditLog | None = AuditLog(Path(audit_path)) if audit_path else None
 
         # Command handlers — own all command dispatch logic
         self._sys_handler = SystemCommandHandler(
@@ -86,8 +100,13 @@ class TuiApp:
             gateway=self.gateway,
             token_counter=self.token_counter,
             session_manager=self.session_manager,
-            audit_log=_audit_log,
+            audit_log=audit_log_inst,
             policy_engine_ref=self._sys_handler,
+        )
+
+        self._agent_handler = AgentCommandHandler(
+            renderer=self.renderer,
+            agent_stack=self.agent_stack,
         )
 
         self._register_builtin_commands()
@@ -112,6 +131,8 @@ class TuiApp:
             SlashCommand(name="split", description="Split the terminal view", tier=InputTier.SYSTEM, args_spec="<direction>"),
             SlashCommand(name="theme", description="Change the TUI theme", tier=InputTier.SYSTEM, args_spec="[name]"),
             SlashCommand(name="login", description="Authenticate with session token", tier=InputTier.SYSTEM),
+            SlashCommand(name="panel", description="Toggle sidebar panel", tier=InputTier.SYSTEM),
+            SlashCommand(name="config", description="Show configuration info", tier=InputTier.SYSTEM),
         ]
 
         service_commands = [
@@ -159,13 +180,15 @@ class TuiApp:
             self._sys_handler.renderer = value
         if hasattr(self, "_svc_handler"):
             self._svc_handler.renderer = value
+        if hasattr(self, "_agent_handler"):
+            self._agent_handler.renderer = value
 
     @property
-    def gateway(self) -> object:
+    def gateway(self) -> GatewayProtocol:
         return self._gateway
 
     @gateway.setter
-    def gateway(self, value: object) -> None:
+    def gateway(self, value: GatewayProtocol) -> None:
         self._gateway = value
         if hasattr(self, "_sys_handler"):
             self._sys_handler.gateway = value
@@ -246,7 +269,6 @@ class TuiApp:
         self._sys_handler._handle_setup(args)
 
     def _get_credential_status(self) -> list[dict]:
-        from corvus.tui.commands.builtins import _get_credential_status
         return _get_credential_status()
 
     async def _handle_memory_command(self, args: str) -> bool:
@@ -268,15 +290,7 @@ class TuiApp:
         if hasattr(self, "_svc_handler"):
             self._svc_handler._handle_audit(args)
         else:
-            # Partial construction (e.g. TuiApp.__new__) — use direct access
-            from corvus.tui.commands.builtins import ServiceCommandHandler
-            handler = ServiceCommandHandler.__new__(ServiceCommandHandler)
-            handler.renderer = self.renderer
-            handler.audit_log = getattr(self, "_audit_log_backing", None)
-            handler._sys = type("_FakeSys", (), {"policy_engine": None, "permission_tier": "default"})()
-            handler._AUDIT_DISPLAY_LIMIT = 20
-            handler._OUTCOME_KEYWORDS = frozenset({"allowed", "denied", "failed"})
-            handler._handle_audit(args)
+            self.renderer.render_system("Audit log not available (app not fully initialized)")
 
     async def _handle_policy_command(self) -> None:
         self._svc_handler._handle_policy()
@@ -292,7 +306,6 @@ class TuiApp:
 
     @staticmethod
     def _detect_language(path: str) -> str:
-        from corvus.tui.commands.builtins import _detect_language
         return _detect_language(path)
 
     # ------------------------------------------------------------------
@@ -304,11 +317,11 @@ class TuiApp:
         if self.agent_stack.depth == 0:
             return HTML("<b>corvus</b>&gt; ")
 
-        agent = self.agent_stack.current.agent_name
+        agent = html.escape(self.agent_stack.current.agent_name)
         if self.agent_stack.depth == 1:
             return HTML(f"<b>@{agent}</b>&gt; ")
 
-        breadcrumb = self.agent_stack.breadcrumb
+        breadcrumb = html.escape(self.agent_stack.breadcrumb)
         return HTML(f"<b>{breadcrumb}</b>&gt; ")
 
     # ------------------------------------------------------------------
@@ -362,58 +375,21 @@ class TuiApp:
         """Handle agent-tier input: chat, mentions, tool calls, and agent commands."""
         if not parsed.text.strip():
             return
-        cmd_name = parsed.command
 
-        if cmd_name == "back":
-            try:
-                popped = self.agent_stack.pop()
-                self.renderer.render_system(f"Left @{popped.agent_name}")
-            except IndexError:
-                self.renderer.render_error("Already at root agent")
-            return
-
-        if cmd_name == "top":
-            try:
-                root = self.agent_stack.pop_to_root()
-                self.renderer.render_system(f"Returned to @{root.agent_name}")
-            except IndexError:
-                self.renderer.render_error("Agent stack is empty")
-            return
-
-        if cmd_name == "enter":
-            target = parsed.command_args
-            if not target:
-                self.renderer.render_error("Usage: /enter <agent>")
-                return
-            try:
-                entered = self.agent_stack.enter(target.strip())
-                self.renderer.render_system(f"Entered @{entered.agent_name}")
-            except KeyError as exc:
-                self.renderer.render_error(str(exc))
-            return
-
-        if cmd_name == "kill":
-            target = parsed.command_args
-            if not target:
-                self.renderer.render_error("Usage: /kill <agent>")
-                return
-            try:
-                killed = self.agent_stack.kill(target.strip())
-                self.renderer.render_system(f"Killed @{killed.agent_name}")
-            except KeyError as exc:
-                self.renderer.render_error(str(exc))
-            return
-
-        if cmd_name == "summon":
-            target = parsed.command_args
-            if not target:
-                self.renderer.render_error("Usage: /summon <agent>")
-                return
-            target = target.strip()
-            self.agent_stack.spawn(target, session_id="")
-            self.renderer.render_system(
-                f"Summoned @{target} as coworker of @{self.agent_stack.current.agent_name}"
-            )
+        # Delegate agent navigation commands to AgentCommandHandler
+        handled = await self._agent_handler.handle(parsed)
+        if handled:
+            # For /spawn with task text, forward the task to the spawned agent
+            if parsed.command == "spawn" and parsed.command_args:
+                parts = parsed.command_args.strip().split(None, 1)
+                if len(parts) > 1:
+                    agent_name = parts[0]
+                    task_text = parts[1].strip().strip('"').strip("'")
+                    if task_text:
+                        try:
+                            await self.gateway.send_message(task_text, requested_agent=agent_name)
+                        except Exception as exc:
+                            self.renderer.render_error(f"Failed to send task to @{agent_name}: {exc}")
             return
 
         # !tool dispatch — send as a message, agent interprets the ! prefix
@@ -471,8 +447,6 @@ class TuiApp:
 
     async def run(self) -> None:
         """Main chat loop: connect, load agents, read input, dispatch."""
-        session: PromptSession = PromptSession(completer=self.completer)
-
         self.renderer.render_system("Connecting to Corvus gateway...")
         await self.gateway.connect()
         self.gateway.on_event(self.event_handler.handle)
@@ -510,7 +484,7 @@ class TuiApp:
 
                 try:
                     prompt = self._build_prompt()
-                    raw = await session.prompt_async(prompt, bottom_toolbar=self.status_bar)
+                    raw = await self._editor.prompt(prompt, bottom_toolbar=self.status_bar)
                 except EOFError:
                     break
                 except KeyboardInterrupt:

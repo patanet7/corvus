@@ -13,6 +13,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+from corvus.gateway.chat_engine import resolve_chat_dispatch
 from corvus.gateway.chat_session import ChatSession
 from corvus.gateway.runtime import GatewayRuntime, build_runtime
 from corvus.gateway.workspace_runtime import cleanup_session_workspaces
@@ -35,6 +36,11 @@ class InProcessGateway(GatewayProtocol):
         self._session: ChatSession | None = None
         self._event_callback: Callable[[ProtocolEvent], Coroutine[Any, Any, None]] | None = None
         self._connected: bool = False
+
+    @property
+    def connected(self) -> bool:
+        """Whether the gateway is currently connected."""
+        return self._connected
 
     # ------------------------------------------------------------------
     # Connection lifecycle
@@ -83,16 +89,16 @@ class InProcessGateway(GatewayProtocol):
         if self._runtime is not None:
             try:
                 await self._runtime.litellm_manager.stop()
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.warning("Failed to stop LiteLLM manager: %s", exc)
             try:
                 await self._runtime.supervisor.graceful_shutdown()
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.warning("Failed to stop supervisor: %s", exc)
             try:
                 await self._runtime.scheduler.stop()
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.warning("Failed to stop scheduler: %s", exc)
         self._session = None
         self._runtime = None
         self._connected = False
@@ -139,8 +145,6 @@ class InProcessGateway(GatewayProtocol):
         session.set_ws_interceptor(_intercept_ws_send)
 
         # Build a dispatch through the session's normal pipeline
-        from corvus.gateway.chat_engine import resolve_chat_dispatch
-
         turn_id = str(uuid.uuid4())
         dispatch_id = str(uuid.uuid4())
         session.current_turn_id = turn_id

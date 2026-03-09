@@ -5,6 +5,7 @@ NO MOCKS. Real Rich Console with StringIO capture, real dataclass instances.
 
 from io import StringIO
 
+import pytest
 from rich.console import Console
 
 from corvus.tui.core.agent_stack import AgentStack
@@ -13,7 +14,8 @@ from corvus.tui.screens.agents import AgentScreen
 from corvus.tui.screens.base import Screen
 from corvus.tui.screens.memory import MemoryScreen
 from corvus.tui.screens.sessions import SessionScreen
-from corvus.tui.screens.setup import SetupScreen, _scan_providers
+from corvus.tui.core.credentials import _get_credential_status
+from corvus.tui.screens.setup import SetupScreen
 from corvus.tui.screens.tools import ToolScreen
 from corvus.tui.screens.workers import WorkerScreen
 from corvus.tui.theme import TuiTheme
@@ -38,12 +40,9 @@ def _output(buf: StringIO) -> str:
 class TestScreenBase:
     def test_screen_is_abstract(self) -> None:
         """Cannot instantiate Screen directly."""
-        try:
-            console, _ = _make_console()
+        console, _ = _make_console()
+        with pytest.raises(TypeError):
             Screen(console, TuiTheme())  # type: ignore[abstract]
-            assert False, "Should have raised TypeError"
-        except TypeError:
-            pass
 
     def test_screen_subclass_has_title(self) -> None:
         """Concrete screens must provide a title."""
@@ -84,7 +83,7 @@ class TestSetupScreen:
         assert "OK" in output or "Missing" in output
 
     def test_scan_providers_returns_list(self) -> None:
-        providers = _scan_providers()
+        providers = _get_credential_status()
         assert isinstance(providers, list)
         assert len(providers) >= 5
         for p in providers:

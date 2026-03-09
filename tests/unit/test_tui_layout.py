@@ -149,7 +149,7 @@ class TestRenderSingle:
         console = _capture_console()
         layout.render(console)
         output = _get_output(console)
-        assert len(output) > 0
+        assert "corvus" in output
 
     def test_render_contains_header_content(self) -> None:
         layout = TerminalLayout()

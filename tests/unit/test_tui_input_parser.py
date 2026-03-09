@@ -4,11 +4,7 @@ from corvus.tui.input.parser import InputParser, ParsedInput
 
 
 class TestParsedInputDataclass:
-    """ParsedInput is a frozen-slots dataclass with correct defaults."""
-
-    def test_slots_enabled(self) -> None:
-        pi = ParsedInput(raw="hi", kind="chat", text="hi")
-        assert hasattr(pi, "__slots__")
+    """ParsedInput is a dataclass with correct defaults and tool_params property."""
 
     def test_defaults(self) -> None:
         pi = ParsedInput(raw="hi", kind="chat", text="hi")
@@ -17,6 +13,14 @@ class TestParsedInputDataclass:
         assert pi.tool_name is None
         assert pi.tool_args is None
         assert pi.mentions == []
+
+    def test_tool_params_none_when_no_tool_args(self) -> None:
+        pi = ParsedInput(raw="hi", kind="chat", text="hi")
+        assert pi.tool_params is None
+
+    def test_tool_params_returns_dict_when_tool_args_set(self) -> None:
+        pi = ParsedInput(raw="!search query", kind="tool_call", text="!search query", tool_name="search", tool_args="query")
+        assert pi.tool_params == {"raw": "query"}
 
 
 class TestPlainChat:

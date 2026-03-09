@@ -246,7 +246,8 @@ class ChatSession:
         passing all dependencies explicitly.
         """
         turn = self._current_turn
-        assert turn is not None, "execute_agent_run requires an active TurnContext"
+        if turn is None:
+            raise RuntimeError("execute_agent_run requires an active TurnContext")
         return await _execute_run(
             emitter=self.emitter,
             runtime=self.runtime,
@@ -273,7 +274,8 @@ class ChatSession:
 
     async def _degraded_message_loop(self) -> None:
         """Run heartbeat/error loop when no LLM backend is configured."""
-        assert self.websocket is not None, "_degraded_message_loop requires an active WebSocket"
+        if self.websocket is None:
+            raise RuntimeError("_degraded_message_loop requires an active WebSocket")
 
         while True:
             data = await self.websocket.receive_text()
@@ -334,7 +336,8 @@ class ChatSession:
         confirm_response, and user chat messages dispatched through the
         planner/router/executor pipeline.
         """
-        assert self.websocket is not None, "run() requires an active WebSocket"
+        if self.websocket is None:
+            raise RuntimeError("run() requires an active WebSocket")
 
         # --- Send init message ---
         enabled_agents = [agent for agent in self.runtime.agents_hub.list_agents() if agent.enabled]
@@ -435,7 +438,8 @@ class ChatSession:
                 self.current_turn_id = None
                 continue
 
-            assert dispatch_resolution is not None
+            if dispatch_resolution is None:
+                raise RuntimeError("Dispatch resolution returned None without an error")
             await self._execute_dispatch_lifecycle(
                 dispatch_id=dispatch_id,
                 turn_id=turn_id,

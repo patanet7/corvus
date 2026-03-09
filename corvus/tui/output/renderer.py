@@ -14,6 +14,7 @@ from rich.text import Text
 
 from corvus.security.policy import PolicyEngine
 from corvus.security.sanitizer import sanitize_tool_result
+from corvus.tui.core.split_manager import SplitManager
 from corvus.tui.output.stream import StreamHandler
 from corvus.tui.theme import TuiTheme
 
@@ -568,7 +569,7 @@ class ChatRenderer:
 
     def render_split_layout(
         self,
-        split_manager: "SplitManager",
+        split_manager: SplitManager,
         left_content: str,
         right_content: str,
     ) -> None:
@@ -592,7 +593,7 @@ class ChatRenderer:
 
     def render_split_message(
         self,
-        split_manager: "SplitManager",
+        split_manager: SplitManager,
         agent: str,
         text: str,
     ) -> None:

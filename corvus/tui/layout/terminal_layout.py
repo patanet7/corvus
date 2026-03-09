@@ -172,7 +172,7 @@ class TerminalLayout:
         elif self._mode == LayoutMode.SIDEBAR:
             body = self._build_sidebar_body()
         else:
-            body = self._build_single_body()
+            raise ValueError(f"Unknown layout mode: {self._mode}")
 
         root.split_column(header, body, status)
         console.print(root)

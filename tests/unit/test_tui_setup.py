@@ -319,5 +319,5 @@ class TestHandleSetupCommand:
 
         app._handle_setup_command(None)
         output = _output(buf)
-        assert "Configured" in output
+        assert "configured" in output.lower()
         assert "Anthropic" in output

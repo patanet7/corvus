@@ -151,11 +151,11 @@ class WebSocketGateway(GatewayProtocol):
     async def connect(self) -> None:
         """Connect to the Corvus server WebSocket endpoint."""
         connect_url = self._url
-        if self._token:
-            sep = "&" if "?" in connect_url else "?"
-            connect_url = f"{connect_url}{sep}token={self._token}"
+        extra_headers = {"Authorization": f"Bearer {self._token}"} if self._token else {}
 
-        self._ws = await websockets.asyncio.client.connect(connect_url)
+        self._ws = await websockets.asyncio.client.connect(
+            connect_url, additional_headers=extra_headers,
+        )
         self._connected = True
 
         # Read the init message
@@ -188,7 +188,8 @@ class WebSocketGateway(GatewayProtocol):
 
     async def _listen(self) -> None:
         """Background task: read messages from WebSocket and dispatch events."""
-        assert self._ws is not None
+        if self._ws is None:
+            raise RuntimeError("connect() must be called before _listen()")
         try:
             async for raw_message in self._ws:
                 try:
@@ -224,7 +225,8 @@ class WebSocketGateway(GatewayProtocol):
         requested_agent: str | None = None,
     ) -> None:
         """Send a chat message to the server."""
-        assert self._ws is not None, "connect() must be called before send_message()"
+        if self._ws is None:
+            raise RuntimeError("connect() must be called before send_message()")
         payload: dict[str, Any] = {"message": text}
         if session_id:
             payload["session_id"] = session_id
@@ -234,7 +236,8 @@ class WebSocketGateway(GatewayProtocol):
 
     async def respond_confirm(self, tool_id: str, approved: bool) -> None:
         """Send a confirmation response back to the server."""
-        assert self._ws is not None, "connect() must be called before respond_confirm()"
+        if self._ws is None:
+            raise RuntimeError("connect() must be called before respond_confirm()")
         await self._ws.send(json.dumps({
             "type": "confirm_response",
             "tool_call_id": tool_id,
@@ -243,7 +246,8 @@ class WebSocketGateway(GatewayProtocol):
 
     async def cancel_run(self, run_id: str) -> None:
         """Send an interrupt signal to cancel the current run."""
-        assert self._ws is not None, "connect() must be called before cancel_run()"
+        if self._ws is None:
+            raise RuntimeError("connect() must be called before cancel_run()")
         await self._ws.send(json.dumps({"type": "interrupt"}))
 
     # -- Queries (from cached init data) --

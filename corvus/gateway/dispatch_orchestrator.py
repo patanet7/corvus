@@ -33,8 +33,10 @@ async def dispatch_control_listener(session: ChatSession) -> None:
     from the WebSocket and handles interrupt, ping, confirm_response,
     and dispatch-in-progress rejection for new prompts.
     """
-    assert session._current_turn is not None, "dispatch_control_listener requires an active TurnContext"
-    assert session.websocket is not None, "dispatch_control_listener requires an active WebSocket"
+    if session._current_turn is None:
+        raise RuntimeError("dispatch_control_listener requires an active TurnContext")
+    if session.websocket is None:
+        raise RuntimeError("dispatch_control_listener requires an active WebSocket")
 
     turn = session._current_turn
 

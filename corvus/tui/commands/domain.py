@@ -89,11 +89,16 @@ class AgentCommandHandler:
         return True
 
     def _handle_spawn(self, args: str | None) -> bool:
-        """Spawn a child agent in the background without entering it."""
+        """Spawn a child agent in the background without entering it.
+
+        Accepts ``/spawn <agent>`` or ``/spawn <agent> "task"``.
+        The task string (if present) is handled by the caller after spawn.
+        """
         if not args:
-            self.renderer.render_error("Usage: /spawn <agent>")
+            self.renderer.render_error('Usage: /spawn <agent> ["task"]')
             return True
-        target = args.strip()
+        parts = args.strip().split(None, 1)
+        target = parts[0]
         self.agent_stack.spawn(target, session_id="")
         self.renderer.render_system(
             f"Spawned @{target} as background child of @{self.agent_stack.current.agent_name}"

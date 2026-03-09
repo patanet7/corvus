@@ -4,14 +4,17 @@ Uses real AuditLog writing to real temp JSONL files — no mocks.
 """
 
 import io
-import json
 import tempfile
 from pathlib import Path
 
 from rich.console import Console
 
 from corvus.security.audit import AuditLog
+from corvus.tui.commands.builtins import ServiceCommandHandler
+from corvus.tui.core.agent_stack import AgentStack
 from corvus.tui.output.renderer import ChatRenderer
+from corvus.tui.output.token_counter import TokenCounter
+from corvus.tui.protocol.in_process import InProcessGateway
 from corvus.tui.theme import TuiTheme
 
 
@@ -74,6 +77,34 @@ def _seed_audit_log(log_path: Path) -> AuditLog:
         duration_ms=30.1,
     )
     return audit
+
+
+class _FakePolicyRef:
+    """Minimal stand-in for SystemCommandHandler providing policy_engine and permission_tier."""
+
+    policy_engine = None
+    permission_tier = "default"
+
+
+def _make_svc_handler(
+    renderer: ChatRenderer, audit_log: AuditLog | None,
+) -> ServiceCommandHandler:
+    """Build a ServiceCommandHandler with minimal real dependencies for audit tests."""
+    from corvus.tui.core.session import TuiSessionManager
+
+    agent_stack = AgentStack()
+    gateway = InProcessGateway()
+    token_counter = TokenCounter()
+    session_manager = TuiSessionManager(gateway, agent_stack)
+    return ServiceCommandHandler(
+        renderer=renderer,
+        agent_stack=agent_stack,
+        gateway=gateway,
+        token_counter=token_counter,
+        session_manager=session_manager,
+        audit_log=audit_log,
+        policy_engine_ref=_FakePolicyRef(),
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -166,12 +197,12 @@ class TestRenderAuditEntries:
 
 
 # ---------------------------------------------------------------------------
-# _handle_audit_command tests — uses real AuditLog on real temp file
+# _handle_audit tests — uses real AuditLog on real temp file
 # ---------------------------------------------------------------------------
 
 
 class TestHandleAuditCommand:
-    """Tests for TuiApp._handle_audit_command() with real JSONL files."""
+    """Tests for ServiceCommandHandler._handle_audit() with real JSONL files."""
 
     def test_audit_no_args_shows_recent_entries(self) -> None:
         """No args shows all recent entries from the audit log."""
@@ -180,13 +211,8 @@ class TestHandleAuditCommand:
             audit = _seed_audit_log(log_path)
             renderer, buf = _make_renderer()
 
-            from corvus.tui.app import TuiApp
-
-            app = TuiApp.__new__(TuiApp)
-            app.renderer = renderer
-            app._audit_log = audit
-
-            app._handle_audit_command(None)
+            handler = _make_svc_handler(renderer, audit)
+            handler._handle_audit(None)
             output = _output(buf)
             # Should show entries from all agents
             assert "homelab" in output
@@ -200,13 +226,8 @@ class TestHandleAuditCommand:
             audit = _seed_audit_log(log_path)
             renderer, buf = _make_renderer()
 
-            from corvus.tui.app import TuiApp
-
-            app = TuiApp.__new__(TuiApp)
-            app.renderer = renderer
-            app._audit_log = audit
-
-            app._handle_audit_command("homelab")
+            handler = _make_svc_handler(renderer, audit)
+            handler._handle_audit("homelab")
             output = _output(buf)
             assert "homelab" in output
             assert "restart_service" in output
@@ -222,13 +243,8 @@ class TestHandleAuditCommand:
             audit = _seed_audit_log(log_path)
             renderer, buf = _make_renderer()
 
-            from corvus.tui.app import TuiApp
-
-            app = TuiApp.__new__(TuiApp)
-            app.renderer = renderer
-            app._audit_log = audit
-
-            app._handle_audit_command("denied")
+            handler = _make_svc_handler(renderer, audit)
+            handler._handle_audit("denied")
             output = _output(buf)
             assert "transfer_funds" in output
             assert "denied" in output.lower()
@@ -243,13 +259,8 @@ class TestHandleAuditCommand:
             audit = _seed_audit_log(log_path)
             renderer, buf = _make_renderer()
 
-            from corvus.tui.app import TuiApp
-
-            app = TuiApp.__new__(TuiApp)
-            app.renderer = renderer
-            app._audit_log = audit
-
-            app._handle_audit_command("failed")
+            handler = _make_svc_handler(renderer, audit)
+            handler._handle_audit("failed")
             output = _output(buf)
             assert "send_email" in output
             assert "restart_service" not in output
@@ -262,27 +273,17 @@ class TestHandleAuditCommand:
             audit = AuditLog(log_path)
             renderer, buf = _make_renderer()
 
-            from corvus.tui.app import TuiApp
-
-            app = TuiApp.__new__(TuiApp)
-            app.renderer = renderer
-            app._audit_log = audit
-
-            app._handle_audit_command(None)
+            handler = _make_svc_handler(renderer, audit)
+            handler._handle_audit(None)
             output = _output(buf)
             assert "No audit entries found" in output
 
     def test_audit_no_audit_log_configured(self) -> None:
-        """When _audit_log is None, shows a helpful message."""
+        """When audit_log is None, shows a helpful message."""
         renderer, buf = _make_renderer()
 
-        from corvus.tui.app import TuiApp
-
-        app = TuiApp.__new__(TuiApp)
-        app.renderer = renderer
-        app._audit_log = None
-
-        app._handle_audit_command(None)
+        handler = _make_svc_handler(renderer, None)
+        handler._handle_audit(None)
         output = _output(buf)
         assert "Audit log not configured" in output
 
@@ -302,13 +303,8 @@ class TestHandleAuditCommand:
                 )
             renderer, buf = _make_renderer()
 
-            from corvus.tui.app import TuiApp
-
-            app = TuiApp.__new__(TuiApp)
-            app.renderer = renderer
-            app._audit_log = audit
-
-            app._handle_audit_command(None)
+            handler = _make_svc_handler(renderer, audit)
+            handler._handle_audit(None)
             output = _output(buf)
             # Last 20 entries: tool_010 through tool_029
             assert "tool_029" in output

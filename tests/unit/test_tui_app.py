@@ -75,7 +75,7 @@ class TestBuiltinSystemCommands:
     SYSTEM_COMMANDS = [
         "help", "quit", "agents", "agent", "models", "model",
         "reload", "setup", "breakglass", "focus", "split", "theme",
-        "login",
+        "login", "panel", "config",
     ]
 
     def test_all_system_commands_registered(self) -> None:

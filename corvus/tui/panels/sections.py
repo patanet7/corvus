@@ -91,6 +91,55 @@ class AgentTreeSection:
         return tree
 
 
+class WorkerTreeSection:
+    """Renders child workers of the current agent as a tree."""
+
+    def __init__(self, agent_stack: AgentStack, theme: TuiTheme) -> None:
+        self._agent_stack = agent_stack
+        self._theme = theme
+
+    def render(self) -> ConsoleRenderable:
+        """Build a Rich Tree of child workers."""
+        if self._agent_stack.depth == 0:
+            return Text("(no workers)", style=self._theme.muted)
+        current = self._agent_stack.current
+        if not current.children:
+            return Text("(no workers)", style=self._theme.muted)
+        tree = Tree(Text("Workers", style=f"bold {self._theme.tool_border}"))
+        for child in current.children:
+            status_label = child.status.value if hasattr(child.status, "value") else str(child.status)
+            tree.add(Text(f"@{child.agent_name} [{status_label}]", style="dim"))
+        return tree
+
+
+class SessionListSection:
+    """Renders a compact list of recent sessions for the sidebar."""
+
+    def __init__(self, theme: TuiTheme) -> None:
+        self._theme = theme
+        self._sessions: list[dict] = []
+
+    def set_sessions(self, sessions: list[dict]) -> None:
+        """Update the session list."""
+        self._sessions = sessions
+
+    def render(self) -> ConsoleRenderable:
+        """Render sessions as a compact list (max 5)."""
+        if not self._sessions:
+            return Text("(no sessions)", style=self._theme.muted)
+        lines: list[Text] = []
+        for s in self._sessions[:5]:
+            sid = str(s.get("session_id", ""))[:8]
+            agent = s.get("agent_name", "unknown")
+            lines.append(Text(f" {sid} @{agent}", style=self._theme.tool_name))
+        result = Text()
+        for i, line in enumerate(lines):
+            result.append(line)
+            if i < len(lines) - 1:
+                result.append("\n")
+        return result
+
+
 class ToolListSection:
     """Renders a compact list of available tools for the sidebar."""
 

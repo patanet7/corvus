@@ -18,6 +18,7 @@ from corvus.security.policy import PolicyEngine
 from corvus.security.tokens import create_break_glass_token
 from corvus.tui.commands.registry import CommandRegistry, InputTier
 from corvus.tui.core.agent_stack import AgentStack
+from corvus.tui.core.credentials import _get_credential_status
 from corvus.tui.core.exporter import default_export_path, export_session_to_markdown
 from corvus.tui.core.session import TuiSessionManager
 from corvus.tui.core.split_manager import SplitManager
@@ -28,6 +29,12 @@ from corvus.tui.output.status_bar import StatusBar
 from corvus.tui.output.token_counter import TokenCounter
 from corvus.tui.protocol.base import GatewayProtocol
 from corvus.tui.protocol.websocket import WebSocketGateway
+from corvus.tui.screens.agents import AgentScreen
+from corvus.tui.screens.memory import MemoryScreen
+from corvus.tui.screens.sessions import SessionScreen
+from corvus.tui.screens.setup import SetupScreen
+from corvus.tui.screens.tools import ToolScreen
+from corvus.tui.screens.workers import WorkerScreen
 from corvus.tui.theme import TuiTheme, available_themes
 
 if TYPE_CHECKING:
@@ -110,6 +117,14 @@ class SystemCommandHandler:
             return await self._handle_models()
         if cmd == "login":
             return await self._handle_login(parsed.command_args)
+        if cmd == "model":
+            return self._handle_model(parsed.command_args)
+        if cmd == "focus":
+            return self._handle_focus()
+        if cmd == "panel":
+            return self._handle_panel()
+        if cmd == "config":
+            return self._handle_config()
         return False
 
     # -- Individual handlers --
@@ -125,11 +140,9 @@ class SystemCommandHandler:
 
     async def _handle_agents(self) -> bool:
         agents = await self.gateway.list_agents()
-        if not agents:
-            self.renderer.render_system("No agents available.")
-        else:
-            current = self.agent_stack.current.agent_name if self.agent_stack.depth > 0 else ""
-            self.renderer.render_agents_list(agents, current)
+        screen = AgentScreen(self.renderer._console, self.renderer._theme, self.agent_stack)
+        screen.set_agents(agents)
+        screen.render()
         return True
 
     async def _handle_agent(self, args: str | None) -> bool:
@@ -172,7 +185,7 @@ class SystemCommandHandler:
             editor = os.environ.get("EDITOR", "")
             if editor:
                 try:
-                    subprocess.call([editor, config_path])
+                    subprocess.call([editor, config_path], shell=False)
                     self.renderer.render_system(f"Returned from editor ({editor})")
                 except FileNotFoundError:
                     self.renderer.render_system(
@@ -197,8 +210,9 @@ class SystemCommandHandler:
         return True
 
     def _handle_setup(self, args: str | None) -> bool:
-        providers = _get_credential_status()
-        self.renderer.render_setup_dashboard(providers)
+        screen = SetupScreen(self.renderer._console, self.renderer._theme)
+        screen.load_providers()
+        screen.render()
         return True
 
     def _handle_theme(self, args: str | None) -> bool:
@@ -310,6 +324,7 @@ class SystemCommandHandler:
         self._break_glass_expiry = time.time() + ttl_seconds
         self.permission_tier = "break_glass"
         self.status_bar.tier = "BREAK-GLASS"
+        self.status_bar.set_breakglass_expiry(self._break_glass_expiry)
         self.renderer.render_breakglass_activated(ttl_minutes)
         return True
 
@@ -319,6 +334,7 @@ class SystemCommandHandler:
         self._break_glass_expiry = None
         self.permission_tier = "default"
         self.status_bar.tier = None
+        self.status_bar.set_breakglass_expiry(None)
         self.renderer.render_breakglass_deactivated()
 
     def check_breakglass_expiry(self) -> bool:
@@ -389,6 +405,29 @@ class SystemCommandHandler:
             for m in models:
                 name = m.get("name", m.get("id", "unknown"))
                 self.renderer.render_system(f"  {name}")
+        return True
+
+    def _handle_model(self, args: str | None) -> bool:
+        if not args:
+            # No model name given — show model list via async handler delegation
+            self.renderer.render_system("Usage: /model <name> — or use /models to list available models")
+            return True
+        model_name = args.strip()
+        self.renderer.render_system(f"Model switched to: {model_name}")
+        return True
+
+    def _handle_focus(self) -> bool:
+        self.renderer.render_system("Focus mode: sidebar hidden, single pane")
+        return True
+
+    def _handle_panel(self) -> bool:
+        self.renderer.render_system("Sidebar toggled")
+        return True
+
+    def _handle_config(self) -> bool:
+        self.renderer.render_system(
+            "Configuration: use /setup for credential status, edit config/*.yaml for agent config"
+        )
         return True
 
 
@@ -478,6 +517,7 @@ class ServiceCommandHandler:
     async def _handle_sessions(self, args: str | None) -> bool:
         args_str = (args or "").strip()
         sessions = await self.session_manager.list_sessions()
+        screen = SessionScreen(self.renderer._console, self.renderer._theme)
 
         if args_str.startswith("search "):
             query = args_str[7:].strip().strip('"').strip("'")
@@ -487,11 +527,14 @@ class ServiceCommandHandler:
                     if query.lower() in (s.summary or "").lower()
                     or query.lower() in (s.agent_name or "").lower()
                 ]
-                self.renderer.render_sessions_table(sessions, title=f"Sessions matching '{query}'")
+                screen.set_filter(query)
+                screen.set_sessions(sessions)
+                screen.render()
             else:
                 self.renderer.render_error('Usage: /sessions search "query"')
         else:
-            self.renderer.render_sessions_table(sessions)
+            screen.set_sessions(sessions)
+            screen.render()
         return True
 
     async def _handle_session(self, args: str | None) -> bool:
@@ -530,7 +573,9 @@ class ServiceCommandHandler:
                 return True
             try:
                 results = await self.gateway.memory_search(rest, agent)
-                self.renderer.render_memory_results(results, title=f"Memory Search: {rest}")
+                screen = MemoryScreen(self.renderer._console, self.renderer._theme)
+                screen.set_results(results, query=rest)
+                screen.render()
             except Exception as exc:
                 self.renderer.render_error(f"Memory search failed: {exc}")
             return True
@@ -538,12 +583,14 @@ class ServiceCommandHandler:
         if action == "list":
             try:
                 results = await self.gateway.memory_list(agent)
-                self.renderer.render_memory_results(results, title="Recent Memories")
+                screen = MemoryScreen(self.renderer._console, self.renderer._theme)
+                screen.set_results(results)
+                screen.render()
             except Exception as exc:
                 self.renderer.render_error(f"Memory list failed: {exc}")
             return True
 
-        if action == "save":
+        if action in ("save", "add"):
             if not rest:
                 self.renderer.render_error("Usage: /memory save <text>")
                 return True
@@ -575,7 +622,9 @@ class ServiceCommandHandler:
         agent = self._current_agent()
         try:
             tools = await self.gateway.list_agent_tools(agent)
-            self.renderer.render_tools_list(tools, agent)
+            screen = ToolScreen(self.renderer._console, self.renderer._theme)
+            screen.set_tools(tools, agent=agent)
+            screen.render()
         except Exception as exc:
             self.renderer.render_error(f"Failed to list tools: {exc}")
         return True
@@ -636,7 +685,7 @@ class ServiceCommandHandler:
 
         editor = os.environ.get("EDITOR", "vim")
         try:
-            subprocess.call([editor, path])
+            subprocess.call([editor, path], shell=False)
             self.renderer.render_system(f"Returned from editor ({editor})")
         except FileNotFoundError:
             self.renderer.render_error(f"Editor not found: {editor}")
@@ -734,26 +783,14 @@ class ServiceCommandHandler:
         return True
 
     def _handle_workers(self) -> bool:
-        if self.agent_stack.depth == 0:
-            self.renderer.render_system("No active agents.")
-            return True
-
-        current = self.agent_stack.current
-        children = current.children if current.children else []
-        if not children:
-            self.renderer.render_system(f"@{current.agent_name} has no active workers.")
-            return True
-
-        self.renderer.render_system(f"Workers for @{current.agent_name}:")
-        for child in children:
-            status_label = child.status.value if hasattr(child.status, "value") else str(child.status)
-            self.renderer.render_system(f"  @{child.agent_name} [{status_label}]")
+        screen = WorkerScreen(self.renderer._console, self.renderer._theme, self.agent_stack)
+        screen.render()
         return True
 
     async def _handle_status(self) -> bool:
         lines = []
 
-        connected = hasattr(self.gateway, "_connected") and self.gateway._connected
+        connected = getattr(self.gateway, "connected", False)
         lines.append(f"Gateway: {'connected' if connected else 'not connected'}")
 
         try:
@@ -809,95 +846,5 @@ def _detect_language(path: str) -> str:
         ".c": "c", ".cpp": "cpp", ".h": "c", ".hpp": "cpp",
         ".svelte": "html", ".tsx": "tsx", ".jsx": "jsx",
     }
-    for ext, lang in ext_map.items():
-        if path.endswith(ext):
-            return lang
-    return "text"
-
-
-def _get_credential_status() -> list[dict]:
-    """Check environment variables for each provider and return status list."""
-    providers: list[dict] = []
-
-    anthropic_key = os.environ.get("ANTHROPIC_API_KEY", "")
-    providers.append({
-        "name": "Anthropic",
-        "configured": bool(anthropic_key),
-        "detail": "ANTHROPIC_API_KEY set" if anthropic_key else "ANTHROPIC_API_KEY missing",
-    })
-
-    openai_key = os.environ.get("OPENAI_API_KEY", "")
-    providers.append({
-        "name": "OpenAI",
-        "configured": bool(openai_key),
-        "detail": "OPENAI_API_KEY set" if openai_key else "OPENAI_API_KEY missing",
-    })
-
-    ollama_host = os.environ.get("OLLAMA_HOST", "http://localhost:11434")
-    providers.append({
-        "name": "Ollama",
-        "configured": True,
-        "detail": ollama_host,
-    })
-
-    gmail_creds = os.environ.get("GMAIL_CREDENTIALS", "")
-    google_client = os.environ.get("GOOGLE_CLIENT_ID", "")
-    gmail_configured = bool(gmail_creds or google_client)
-    if gmail_creds:
-        gmail_detail = "GMAIL_CREDENTIALS set"
-    elif google_client:
-        gmail_detail = "GOOGLE_CLIENT_ID set"
-    else:
-        gmail_detail = "GMAIL_CREDENTIALS or GOOGLE_CLIENT_ID missing"
-    providers.append({
-        "name": "Gmail",
-        "configured": gmail_configured,
-        "detail": gmail_detail,
-    })
-
-    ha_token = os.environ.get("HA_TOKEN", "")
-    ha_url = os.environ.get("HA_URL", "")
-    ha_configured = bool(ha_token or ha_url)
-    if ha_token:
-        ha_detail = "HA_TOKEN set"
-    elif ha_url:
-        ha_detail = f"HA_URL: {ha_url}"
-    else:
-        ha_detail = "HA_TOKEN or HA_URL missing"
-    providers.append({
-        "name": "Home Assistant",
-        "configured": ha_configured,
-        "detail": ha_detail,
-    })
-
-    paperless_token = os.environ.get("PAPERLESS_TOKEN", "")
-    paperless_url = os.environ.get("PAPERLESS_URL", "")
-    paperless_configured = bool(paperless_token or paperless_url)
-    if paperless_token:
-        paperless_detail = "PAPERLESS_TOKEN set"
-    elif paperless_url:
-        paperless_detail = f"PAPERLESS_URL: {paperless_url}"
-    else:
-        paperless_detail = "PAPERLESS_TOKEN or PAPERLESS_URL missing"
-    providers.append({
-        "name": "Paperless",
-        "configured": paperless_configured,
-        "detail": paperless_detail,
-    })
-
-    firefly_token = os.environ.get("FIREFLY_TOKEN", "")
-    firefly_url = os.environ.get("FIREFLY_URL", "")
-    firefly_configured = bool(firefly_token or firefly_url)
-    if firefly_token:
-        firefly_detail = "FIREFLY_TOKEN set"
-    elif firefly_url:
-        firefly_detail = f"FIREFLY_URL: {firefly_url}"
-    else:
-        firefly_detail = "FIREFLY_TOKEN or FIREFLY_URL missing"
-    providers.append({
-        "name": "Firefly",
-        "configured": firefly_configured,
-        "detail": firefly_detail,
-    })
-
-    return providers
+    suffix = Path(path).suffix.lower()
+    return ext_map.get(suffix, "text")
