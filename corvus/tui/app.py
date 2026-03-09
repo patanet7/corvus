@@ -14,8 +14,11 @@ from corvus.tui.commands.registry import CommandRegistry, InputTier, SlashComman
 from corvus.tui.core.agent_stack import AgentStack
 from corvus.tui.core.command_router import CommandRouter
 from corvus.tui.core.event_handler import EventHandler
+from corvus.tui.core.session import TuiSessionManager
+from corvus.tui.input.completer import ChatCompleter
 from corvus.tui.input.parser import InputParser, ParsedInput
 from corvus.tui.output.renderer import ChatRenderer
+from corvus.tui.output.token_counter import TokenCounter
 from corvus.tui.protocol.in_process import InProcessGateway
 from corvus.tui.theme import TuiTheme
 
@@ -26,8 +29,8 @@ class TuiApp:
     """Main TUI application coordinating all components.
 
     Creates the theme, console, renderer, agent stack, command registry,
-    command router, input parser, event handler, and gateway on construction.
-    Registers all built-in slash commands and provides the main chat loop.
+    command router, input parser, event handler, gateway, token counter,
+    completer, and session manager on construction.
     """
 
     def __init__(self) -> None:
@@ -38,8 +41,11 @@ class TuiApp:
         self.command_registry = CommandRegistry()
         self.command_router = CommandRouter(self.command_registry)
         self.parser = InputParser()
-        self.event_handler = EventHandler(self.renderer, self.agent_stack)
+        self.token_counter = TokenCounter()
+        self.event_handler = EventHandler(self.renderer, self.agent_stack, self.token_counter)
         self.gateway = InProcessGateway()
+        self.completer = ChatCompleter(self.command_registry)
+        self.session_manager = TuiSessionManager(self.gateway, self.agent_stack)
 
         self._register_builtin_commands()
 
@@ -49,7 +55,6 @@ class TuiApp:
 
     def _register_builtin_commands(self) -> None:
         """Register all built-in slash commands with correct tiers."""
-        # SYSTEM tier
         system_commands = [
             SlashCommand(name="help", description="Show available commands", tier=InputTier.SYSTEM),
             SlashCommand(name="quit", description="Exit the TUI", tier=InputTier.SYSTEM),
@@ -65,10 +70,9 @@ class TuiApp:
             SlashCommand(name="theme", description="Change the TUI theme", tier=InputTier.SYSTEM, args_spec="[name]"),
         ]
 
-        # SERVICE tier
         service_commands = [
             SlashCommand(name="sessions", description="List all sessions", tier=InputTier.SERVICE),
-            SlashCommand(name="session", description="Switch to or view a session", tier=InputTier.SERVICE, args_spec="<id>"),
+            SlashCommand(name="session", description="Manage sessions (new/resume)", tier=InputTier.SERVICE, args_spec="<action> [id]"),
             SlashCommand(name="memory", description="Search or manage memory", tier=InputTier.SERVICE, args_spec="<action> [query]"),
             SlashCommand(name="tools", description="List available tools", tier=InputTier.SERVICE),
             SlashCommand(name="tool", description="View tool details", tier=InputTier.SERVICE, args_spec="<name>"),
@@ -84,7 +88,6 @@ class TuiApp:
             SlashCommand(name="policy", description="View or modify tool policies", tier=InputTier.SERVICE, args_spec="[action]"),
         ]
 
-        # AGENT tier
         agent_commands = [
             SlashCommand(name="spawn", description="Spawn a child agent in background", tier=InputTier.AGENT, args_spec="<name>", agent_scoped=True),
             SlashCommand(name="enter", description="Enter a child agent", tier=InputTier.AGENT, args_spec="<name>", agent_scoped=True),
@@ -102,15 +105,18 @@ class TuiApp:
     # ------------------------------------------------------------------
 
     def _build_prompt(self) -> HTML:
-        """Build the prompt showing the current agent path."""
+        """Build the prompt with agent path and token count."""
+        tokens = self.token_counter.format_display()
+
         if self.agent_stack.depth == 0:
-            return HTML("<b>corvus</b>&gt; ")
+            return HTML(f"<b>corvus</b> <i>[{tokens}]</i>&gt; ")
+
+        agent = self.agent_stack.current.agent_name
         if self.agent_stack.depth == 1:
-            agent = self.agent_stack.current.agent_name
-            color = self.theme.agent_color(agent)
-            return HTML(f"<b>@{agent}</b>&gt; ")
+            return HTML(f"<b>@{agent}</b> <i>[{tokens}]</i>&gt; ")
+
         breadcrumb = self.agent_stack.breadcrumb
-        return HTML(f"<b>{breadcrumb}</b>&gt; ")
+        return HTML(f"<b>{breadcrumb}</b> <i>[{tokens}]</i>&gt; ")
 
     # ------------------------------------------------------------------
     # Command handlers
@@ -143,7 +149,8 @@ class TuiApp:
                 for agent in agents:
                     label = agent.get("label", agent.get("id", "unknown"))
                     desc = agent.get("description", "")
-                    self.renderer.render_system(f"  {label} — {desc}")
+                    marker = " *" if self.agent_stack.depth > 0 and self.agent_stack.current.agent_name == agent.get("id") else ""
+                    self.renderer.render_system(f"  @{label}{marker} — {desc}")
             return True
 
         if cmd_name == "agent":
@@ -153,11 +160,54 @@ class TuiApp:
                 return True
             agent_name = agent_name.strip()
             self.agent_stack.switch(agent_name, session_id="")
-            self.parser.update_agents([agent_name])
             self.renderer.render_system(f"Switched to @{agent_name}")
             return True
 
         return False
+
+    async def _handle_service_command(self, parsed: ParsedInput) -> bool:
+        """Handle service-tier commands. Returns True if handled."""
+        cmd_name = parsed.command
+
+        if cmd_name == "tokens":
+            self.renderer.render_system(f"Session total: {self.token_counter.format_display()}")
+            for agent, count in self.token_counter.all_agents.items():
+                self.renderer.render_system(f"  @{agent}: {count:,} tokens")
+            return True
+
+        if cmd_name == "sessions":
+            sessions = await self.session_manager.list_sessions()
+            if not sessions:
+                self.renderer.render_system("No sessions found.")
+            else:
+                self.renderer.render_system("Recent sessions:")
+                for s in sessions:
+                    self.renderer.render_system(f"  {self.session_manager.format_session_summary(s)}")
+            return True
+
+        if cmd_name == "session":
+            args = parsed.command_args or ""
+            parts = args.strip().split(maxsplit=1)
+            if not parts:
+                self.renderer.render_error("Usage: /session new | /session resume <id>")
+                return True
+            action = parts[0]
+            if action == "new":
+                agent = self.agent_stack.current.agent_name if self.agent_stack.depth > 0 else "huginn"
+                sid = await self.session_manager.create(agent)
+                self.renderer.render_system(f"New session: {sid[:8]} (@{agent})")
+            elif action == "resume" and len(parts) > 1:
+                sid = parts[1]
+                detail = await self.session_manager.resume(sid)
+                agent = detail.agent_name or "unknown"
+                msgs = detail.message_count
+                self.renderer.render_system(f"Resumed session {sid[:8]} (@{agent}, {msgs} messages)")
+            else:
+                self.renderer.render_error("Usage: /session new | /session resume <id>")
+            return True
+
+        self.renderer.render_system(f"/{cmd_name} — not yet implemented")
+        return True
 
     async def _handle_agent_input(self, parsed: ParsedInput) -> None:
         """Handle agent-tier input: chat, mentions, and agent commands."""
@@ -228,7 +278,7 @@ class TuiApp:
 
     async def run(self) -> None:
         """Main chat loop: connect, load agents, read input, dispatch."""
-        session: PromptSession = PromptSession()
+        session: PromptSession = PromptSession(completer=self.completer)
 
         self.renderer.render_system("Connecting to Corvus gateway...")
         await self.gateway.connect()
@@ -238,16 +288,16 @@ class TuiApp:
         agents = await self.gateway.list_agents()
         agent_names = [a.get("id", "") for a in agents if a.get("id")]
         self.parser.update_agents(agent_names)
+        self.completer.update_agents(agent_names)
 
         if agent_names:
-            # Default to huginn (router) — it will dispatch to the right agent
             default_agent = "huginn" if "huginn" in agent_names else agent_names[0]
             self.agent_stack.push(default_agent, session_id="")
             self.renderer.render_system(f"Ready. Talking to @{default_agent} ({len(agent_names)} agents available)")
         else:
             self.renderer.render_system("Ready. No agents loaded.")
 
-        self.renderer.render_system("Type /help for available commands, /quit to exit.\n")
+        self.renderer.render_system("Type /help for commands. Tab to complete. /quit to exit.\n")
 
         try:
             while True:
@@ -287,7 +337,7 @@ class TuiApp:
                         continue
 
                 if tier is InputTier.SERVICE:
-                    self.renderer.render_system(f"/{parsed.command} — not yet implemented")
+                    await self._handle_service_command(parsed)
                     continue
 
                 await self._handle_agent_input(parsed)

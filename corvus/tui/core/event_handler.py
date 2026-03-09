@@ -6,6 +6,7 @@ state transitions. Tracks streaming state and pending confirmations.
 
 from corvus.tui.core.agent_stack import AgentStack, AgentStatus
 from corvus.tui.output.renderer import ChatRenderer
+from corvus.tui.output.token_counter import TokenCounter
 from corvus.tui.protocol.events import (
     ConfirmRequest,
     DispatchComplete,
@@ -30,9 +31,15 @@ class EventHandler:
     - Accumulate token counts on agent contexts
     """
 
-    def __init__(self, renderer: ChatRenderer, agent_stack: AgentStack) -> None:
+    def __init__(
+        self,
+        renderer: ChatRenderer,
+        agent_stack: AgentStack,
+        token_counter: TokenCounter | None = None,
+    ) -> None:
         self._renderer = renderer
         self._agent_stack = agent_stack
+        self._token_counter = token_counter
         self._pending_confirm: ConfirmRequest | None = None
         self._streaming_agent: str | None = None
 
@@ -106,6 +113,8 @@ class EventHandler:
         if ctx is not None:
             ctx.status = AgentStatus.IDLE
             ctx.token_count += event.tokens_used
+        if self._token_counter is not None:
+            self._token_counter.add(event.agent, event.tokens_used)
 
     def _handle_tool_start(self, event: ToolStart) -> None:
         """End any stream and render tool start panel."""
