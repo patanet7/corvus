@@ -1,0 +1,714 @@
+"""Behavioral tests for TUI event flow — field aliasing, tool name carry-through,
+agent routing, and rendered output contracts.
+
+These test the REAL event paths: server-emitted payloads → parse_event → EventHandler
+→ ChatRenderer output.  No mocks, no fakes.
+"""
+
+import io
+
+import pytest
+from rich.console import Console
+
+from corvus.tui.core.agent_stack import AgentStack, AgentStatus
+from corvus.tui.core.event_handler import EventHandler
+from corvus.tui.output.renderer import ChatRenderer
+from corvus.tui.output.token_counter import TokenCounter
+from corvus.tui.protocol.events import (
+    ToolResult,
+    ToolStart,
+    parse_event,
+)
+from corvus.tui.theme import TuiTheme
+
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+def _make_stack_renderer() -> tuple[EventHandler, AgentStack, io.StringIO, TokenCounter]:
+    """Build an EventHandler wired to a real renderer writing to a StringIO buffer."""
+    buf = io.StringIO()
+    console = Console(file=buf, force_terminal=True, width=120)
+    theme = TuiTheme()
+    renderer = ChatRenderer(console=console, theme=theme)
+    stack = AgentStack()
+    counter = TokenCounter()
+    handler = EventHandler(renderer, stack, counter)
+    return handler, stack, buf, counter
+
+
+def _output(buf: io.StringIO) -> str:
+    buf.seek(0)
+    text = buf.read()
+    buf.seek(0)
+    buf.truncate()
+    return text
+
+
+# ===========================================================================
+# 1. Field alias mapping — server payloads use different names than TUI
+# ===========================================================================
+
+class TestServerFieldAliases:
+    """parse_event normalizes server-emitted field names to TUI dataclass fields.
+
+    The server sends: call_id, params (tool_start); call_id (tool_result).
+    The TUI dataclasses expect: tool_id, input (ToolStart); tool_id (ToolResult).
+    """
+
+    def test_tool_start_call_id_maps_to_tool_id(self) -> None:
+        raw = {
+            "type": "tool_start",
+            "tool": "memory_search",
+            "call_id": "abc-123",
+            "params": {"query": "homelab"},
+        }
+        event = parse_event(raw)
+        assert isinstance(event, ToolStart)
+        assert event.tool_id == "abc-123"
+
+    def test_tool_start_params_maps_to_input(self) -> None:
+        raw = {
+            "type": "tool_start",
+            "tool": "memory_search",
+            "call_id": "abc-123",
+            "params": {"query": "homelab"},
+        }
+        event = parse_event(raw)
+        assert isinstance(event, ToolStart)
+        assert event.input == {"query": "homelab"}
+
+    def test_tool_result_call_id_maps_to_tool_id(self) -> None:
+        raw = {
+            "type": "tool_result",
+            "call_id": "abc-123",
+            "output": "found 3 results",
+            "status": "success",
+        }
+        event = parse_event(raw)
+        assert isinstance(event, ToolResult)
+        assert event.tool_id == "abc-123"
+
+    def test_tool_result_preserves_output(self) -> None:
+        raw = {
+            "type": "tool_result",
+            "call_id": "abc-123",
+            "output": "search results here",
+            "status": "success",
+        }
+        event = parse_event(raw)
+        assert isinstance(event, ToolResult)
+        assert event.output == "search results here"
+
+    def test_tool_result_has_no_tool_name_from_server(self) -> None:
+        """The server never sends a 'tool' field in tool_result payloads.
+
+        This is by design — the event handler must track tool names
+        from tool_start events.
+        """
+        raw = {
+            "type": "tool_result",
+            "call_id": "abc-123",
+            "output": "ok",
+            "status": "success",
+        }
+        event = parse_event(raw)
+        assert isinstance(event, ToolResult)
+        assert event.tool == ""  # empty — name must come from tool_start
+
+    def test_tool_start_native_field_names_still_work(self) -> None:
+        """If a future server sends the TUI field names directly, they still work."""
+        raw = {
+            "type": "tool_start",
+            "tool": "Bash",
+            "tool_id": "native-id",
+            "input": {"command": "ls"},
+        }
+        event = parse_event(raw)
+        assert isinstance(event, ToolStart)
+        assert event.tool_id == "native-id"
+        assert event.input == {"command": "ls"}
+
+    def test_acp_tool_result_content_maps_to_output(self) -> None:
+        """ACP path sends 'content' instead of 'output'."""
+        raw = {
+            "type": "tool_result",
+            "tool_call_id": "acp-001",
+            "content": "acp result data",
+            "status": "success",
+        }
+        event = parse_event(raw)
+        assert isinstance(event, ToolResult)
+        assert event.tool_id == "acp-001"
+        assert event.output == "acp result data"
+
+
+# ===========================================================================
+# 2. Tool name carry-through — EventHandler tracks names across events
+# ===========================================================================
+
+class TestToolNameCarryThrough:
+    """EventHandler carries the tool name from tool_start to tool_result.
+
+    The server's tool_result payload has no tool name. The event handler
+    stores it from tool_start (keyed by tool_id) and injects it when
+    rendering tool_result.
+    """
+
+    @pytest.mark.asyncio
+    async def test_tool_name_appears_in_result_panel(self) -> None:
+        handler, stack, buf, _ = _make_stack_renderer()
+
+        # Simulate server payloads
+        tool_start_raw = {
+            "type": "tool_start",
+            "tool": "mcp__memory__search",
+            "call_id": "call-001",
+            "params": {},
+        }
+        tool_result_raw = {
+            "type": "tool_result",
+            "call_id": "call-001",
+            "output": "3 memories found",
+            "status": "success",
+        }
+
+        await handler.handle(parse_event(tool_start_raw))
+        _output(buf)  # clear tool_start output
+
+        await handler.handle(parse_event(tool_result_raw))
+        result_output = _output(buf)
+
+        assert "mcp__memory__search" in result_output
+
+    @pytest.mark.asyncio
+    async def test_tool_name_missing_without_prior_start(self) -> None:
+        """If tool_result arrives without a prior tool_start, tool name is empty."""
+        handler, stack, buf, _ = _make_stack_renderer()
+
+        tool_result_raw = {
+            "type": "tool_result",
+            "call_id": "orphan-001",
+            "output": "some output",
+            "status": "success",
+        }
+
+        await handler.handle(parse_event(tool_result_raw))
+        result_output = _output(buf)
+
+        # Panel renders but tool name is absent
+        assert "some output" in result_output
+
+    @pytest.mark.asyncio
+    async def test_multiple_tools_tracked_independently(self) -> None:
+        handler, stack, buf, _ = _make_stack_renderer()
+
+        # Two tool_start events with different IDs
+        await handler.handle(parse_event({
+            "type": "tool_start",
+            "tool": "tool_alpha",
+            "call_id": "id-alpha",
+            "params": {},
+        }))
+        await handler.handle(parse_event({
+            "type": "tool_start",
+            "tool": "tool_beta",
+            "call_id": "id-beta",
+            "params": {},
+        }))
+        _output(buf)  # clear
+
+        # Results arrive in reverse order
+        await handler.handle(parse_event({
+            "type": "tool_result",
+            "call_id": "id-beta",
+            "output": "beta output",
+            "status": "success",
+        }))
+        beta_output = _output(buf)
+        assert "tool_beta" in beta_output
+
+        await handler.handle(parse_event({
+            "type": "tool_result",
+            "call_id": "id-alpha",
+            "output": "alpha output",
+            "status": "success",
+        }))
+        alpha_output = _output(buf)
+        assert "tool_alpha" in alpha_output
+
+
+# ===========================================================================
+# 3. Thinking message format — must use @agent prefix
+# ===========================================================================
+
+class TestThinkingSpinner:
+    """run_start events start a thinking spinner, which stops on stream/tool."""
+
+    @pytest.mark.asyncio
+    async def test_thinking_starts_spinner(self) -> None:
+        handler, stack, buf, _ = _make_stack_renderer()
+
+        await handler.handle(parse_event({
+            "type": "run_start",
+            "agent": "homelab",
+            "run_id": "r-1",
+        }))
+
+        # Spinner is a Live display — verify it was started
+        assert handler._renderer._thinking_live is not None
+
+    @pytest.mark.asyncio
+    async def test_thinking_spinner_stops_on_stream(self) -> None:
+        handler, stack, buf, _ = _make_stack_renderer()
+
+        await handler.handle(parse_event({
+            "type": "run_start",
+            "agent": "homelab",
+            "run_id": "r-1",
+        }))
+        assert handler._renderer._thinking_live is not None
+
+        # First output chunk should stop the spinner
+        await handler.handle(parse_event({
+            "type": "run_output_chunk",
+            "agent": "homelab",
+            "content": "Hello",
+        }))
+        assert handler._renderer._thinking_live is None
+
+    @pytest.mark.asyncio
+    async def test_thinking_spinner_stops_on_tool(self) -> None:
+        handler, stack, buf, _ = _make_stack_renderer()
+
+        await handler.handle(parse_event({
+            "type": "run_start",
+            "agent": "homelab",
+            "run_id": "r-1",
+        }))
+        assert handler._renderer._thinking_live is not None
+
+        await handler.handle(parse_event({
+            "type": "tool_start",
+            "tool": "Bash",
+            "call_id": "c-1",
+            "params": {"command": "ls"},
+        }))
+        assert handler._renderer._thinking_live is None
+
+    @pytest.mark.asyncio
+    async def test_thinking_sets_agent_status(self) -> None:
+        handler, stack, buf, _ = _make_stack_renderer()
+        stack.push("homelab", session_id="s1")
+
+        await handler.handle(parse_event({
+            "type": "run_start",
+            "agent": "homelab",
+            "run_id": "r-1",
+        }))
+
+        ctx = stack.find("homelab")
+        assert ctx is not None
+        assert ctx.status == AgentStatus.THINKING
+
+        # Clean up spinner
+        handler._renderer._stop_thinking()
+
+
+# ===========================================================================
+# 4. Streaming → Markdown rendering contract
+# ===========================================================================
+
+class TestStreamingToMarkdown:
+    """Streaming chunks render live and finalize as markdown in a panel."""
+
+    @pytest.mark.asyncio
+    async def test_stream_starts_live_display(self) -> None:
+        handler, stack, buf, _ = _make_stack_renderer()
+
+        await handler.handle(parse_event({
+            "type": "run_output_chunk",
+            "agent": "general",
+            "content": "Hello",
+        }))
+
+        # Live display should be active
+        assert handler._renderer._live is not None
+
+        # Clean up
+        await handler.handle(parse_event({
+            "type": "run_complete",
+            "agent": "general",
+            "tokens_used": 10,
+        }))
+
+    @pytest.mark.asyncio
+    async def test_stream_live_stops_on_complete(self) -> None:
+        handler, stack, buf, _ = _make_stack_renderer()
+
+        await handler.handle(parse_event({
+            "type": "run_output_chunk",
+            "agent": "general",
+            "content": "Hello",
+        }))
+        await handler.handle(parse_event({
+            "type": "run_complete",
+            "agent": "general",
+            "tokens_used": 10,
+        }))
+
+        assert handler._renderer._live is None
+
+    @pytest.mark.asyncio
+    async def test_stream_renders_markdown_not_raw(self) -> None:
+        handler, stack, buf, _ = _make_stack_renderer()
+
+        await handler.handle(parse_event({
+            "type": "run_output_chunk",
+            "agent": "general",
+            "content": "Hello **world**!",
+        }))
+        await handler.handle(parse_event({
+            "type": "run_complete",
+            "agent": "general",
+            "tokens_used": 50,
+        }))
+        output = _output(buf)
+
+        # Rich Markdown renders **bold** as styled text, not literal asterisks.
+        # The final panel should contain "world" but NOT literal "**world**"
+        assert "world" in output
+        assert "**world**" not in output
+
+    @pytest.mark.asyncio
+    async def test_stream_chunks_concatenate(self) -> None:
+        handler, stack, buf, _ = _make_stack_renderer()
+
+        await handler.handle(parse_event({
+            "type": "run_output_chunk",
+            "agent": "work",
+            "content": "Part one. ",
+        }))
+        await handler.handle(parse_event({
+            "type": "run_output_chunk",
+            "agent": "work",
+            "content": "Part two.",
+        }))
+        await handler.handle(parse_event({
+            "type": "run_complete",
+            "agent": "work",
+            "tokens_used": 100,
+        }))
+        output = _output(buf)
+
+        assert "Part one" in output
+        assert "Part two" in output
+
+    @pytest.mark.asyncio
+    async def test_stream_panel_shows_agent_name(self) -> None:
+        handler, stack, buf, _ = _make_stack_renderer()
+
+        await handler.handle(parse_event({
+            "type": "run_output_chunk",
+            "agent": "finance",
+            "content": "Your balance is $1,234.",
+        }))
+        await handler.handle(parse_event({
+            "type": "run_complete",
+            "agent": "finance",
+            "tokens_used": 30,
+        }))
+        output = _output(buf)
+
+        assert "@finance" in output
+
+
+# ===========================================================================
+# 5. Token counting through events
+# ===========================================================================
+
+class TestTokenCountingThroughEvents:
+    """run_complete events accumulate tokens in the counter."""
+
+    @pytest.mark.asyncio
+    async def test_tokens_accumulated_from_run_complete(self) -> None:
+        handler, stack, buf, counter = _make_stack_renderer()
+        stack.push("work", session_id="s1")
+
+        await handler.handle(parse_event({
+            "type": "run_complete",
+            "agent": "work",
+            "tokens_used": 500,
+        }))
+        await handler.handle(parse_event({
+            "type": "run_complete",
+            "agent": "work",
+            "tokens_used": 300,
+        }))
+
+        assert counter.agent_total("work") == 800
+        assert counter.session_total == 800
+
+    @pytest.mark.asyncio
+    async def test_tokens_tracked_per_agent(self) -> None:
+        handler, stack, buf, counter = _make_stack_renderer()
+
+        await handler.handle(parse_event({
+            "type": "run_complete",
+            "agent": "work",
+            "tokens_used": 200,
+        }))
+        await handler.handle(parse_event({
+            "type": "run_complete",
+            "agent": "finance",
+            "tokens_used": 150,
+        }))
+
+        assert counter.agent_total("work") == 200
+        assert counter.agent_total("finance") == 150
+        assert counter.session_total == 350
+
+
+# ===========================================================================
+# 6. Welcome banner rendering contract
+# ===========================================================================
+
+class TestWelcomeBanner:
+    """The welcome banner renders themed content with agent info."""
+
+    def test_welcome_contains_corvus_title(self) -> None:
+        buf = io.StringIO()
+        console = Console(file=buf, force_terminal=True, width=80)
+        theme = TuiTheme()
+        renderer = ChatRenderer(console, theme)
+
+        renderer.render_welcome(agent_count=10, default_agent="huginn")
+        output = _output(buf)
+
+        assert "CORVUS" in output
+
+    def test_welcome_shows_agent_count(self) -> None:
+        buf = io.StringIO()
+        console = Console(file=buf, force_terminal=True, width=80)
+        theme = TuiTheme()
+        renderer = ChatRenderer(console, theme)
+
+        renderer.render_welcome(agent_count=7, default_agent="huginn")
+        output = _output(buf)
+
+        assert "7 agents" in output
+
+    def test_welcome_shows_default_agent(self) -> None:
+        buf = io.StringIO()
+        console = Console(file=buf, force_terminal=True, width=80)
+        theme = TuiTheme()
+        renderer = ChatRenderer(console, theme)
+
+        renderer.render_welcome(agent_count=5, default_agent="homelab")
+        output = _output(buf)
+
+        assert "@homelab" in output
+
+    def test_welcome_shows_help_hint(self) -> None:
+        buf = io.StringIO()
+        console = Console(file=buf, force_terminal=True, width=80)
+        theme = TuiTheme()
+        renderer = ChatRenderer(console, theme)
+
+        renderer.render_welcome(agent_count=5, default_agent="huginn")
+        output = _output(buf)
+
+        assert "/help" in output
+        assert "/quit" in output
+
+
+# ===========================================================================
+# 7. Error rendering
+# ===========================================================================
+
+class TestErrorRendering:
+    """Errors render in panels with the error text visible."""
+
+    def test_error_panel_contains_message(self) -> None:
+        buf = io.StringIO()
+        console = Console(file=buf, force_terminal=True, width=80)
+        renderer = ChatRenderer(console, TuiTheme())
+
+        renderer.render_error("Connection refused")
+        output = _output(buf)
+
+        assert "Connection refused" in output
+        assert "Error" in output
+
+    def test_error_panel_contains_title(self) -> None:
+        buf = io.StringIO()
+        console = Console(file=buf, force_terminal=True, width=80)
+        renderer = ChatRenderer(console, TuiTheme())
+
+        renderer.render_error("timeout")
+        output = _output(buf)
+
+        assert "Error" in output
+
+
+# ===========================================================================
+# 8. Agent routing intent — app passes selected agent to gateway
+# ===========================================================================
+
+class TestAgentRoutingIntent:
+    """TuiApp._handle_agent_input passes the selected agent to the gateway.
+
+    We test the routing logic in isolation: when agent X is on the stack,
+    the gateway should receive requested_agent=X (unless X is huginn).
+    """
+
+    def test_selected_agent_is_not_huginn_routes_directly(self) -> None:
+        """When user selects homelab, messages should bypass the router."""
+        from corvus.tui.app import TuiApp
+
+        app = TuiApp()
+        app.agent_stack.push("homelab", session_id="s1")
+
+        # The routing logic from _handle_agent_input
+        selected = app.agent_stack.current.agent_name
+        target = None if selected == "huginn" else selected
+
+        assert target == "homelab"
+
+    def test_huginn_selected_lets_router_decide(self) -> None:
+        """When user is on huginn (router), messages go through classification."""
+        from corvus.tui.app import TuiApp
+
+        app = TuiApp()
+        app.agent_stack.push("huginn", session_id="s1")
+
+        selected = app.agent_stack.current.agent_name
+        target = None if selected == "huginn" else selected
+
+        assert target is None
+
+    def test_empty_stack_lets_router_decide(self) -> None:
+        """With no agent selected, messages go through router classification."""
+        from corvus.tui.app import TuiApp
+
+        app = TuiApp()
+
+        if app.agent_stack.depth > 0:
+            selected = app.agent_stack.current.agent_name
+            target = None if selected == "huginn" else selected
+        else:
+            target = None
+
+        assert target is None
+
+
+# ===========================================================================
+# 9. Confirm prompt rendering
+# ===========================================================================
+
+class TestConfirmPromptRendering:
+    """Confirmation prompts show tool name and yes/no/always options."""
+
+    @pytest.mark.asyncio
+    async def test_confirm_shows_tool_name_and_options(self) -> None:
+        handler, stack, buf, _ = _make_stack_renderer()
+
+        await handler.handle(parse_event({
+            "type": "confirm_request",
+            "tool": "Bash",
+            "tool_id": "tid-42",
+            "agent": "homelab",
+            "input": {"command": "docker restart nginx"},
+            "risk": "high",
+        }))
+        output = _output(buf)
+
+        assert "Bash" in output
+        assert "docker restart nginx" in output
+        assert "yes" in output.lower() or "(y)" in output.lower()
+        assert "no" in output.lower() or "(n)" in output.lower()
+
+    @pytest.mark.asyncio
+    async def test_confirm_stores_pending(self) -> None:
+        handler, stack, buf, _ = _make_stack_renderer()
+
+        await handler.handle(parse_event({
+            "type": "confirm_request",
+            "tool": "Bash",
+            "tool_id": "tid-42",
+            "agent": "homelab",
+            "input": {},
+        }))
+
+        assert handler.pending_confirm is not None
+        assert handler.pending_confirm.tool_id == "tid-42"
+        assert handler.pending_confirm.tool == "Bash"
+
+    @pytest.mark.asyncio
+    async def test_clear_confirm_removes_pending(self) -> None:
+        handler, stack, buf, _ = _make_stack_renderer()
+
+        await handler.handle(parse_event({
+            "type": "confirm_request",
+            "tool": "Bash",
+            "tool_id": "tid-42",
+            "agent": "homelab",
+            "input": {},
+        }))
+
+        handler.clear_confirm()
+        assert handler.pending_confirm is None
+
+
+# ===========================================================================
+# 10. Help and agents list rendering
+# ===========================================================================
+
+class TestHelpAndAgentsListRendering:
+    """Help and agents list render as Rich tables with real content."""
+
+    def test_help_shows_command_names(self) -> None:
+        from corvus.tui.app import TuiApp
+        from corvus.tui.commands.registry import InputTier
+
+        buf = io.StringIO()
+        console = Console(file=buf, force_terminal=True, width=120)
+        theme = TuiTheme()
+
+        app = TuiApp()
+        app.console = console
+        app.renderer = ChatRenderer(console, theme)
+
+        commands_by_tier = {}
+        for tier in (InputTier.SYSTEM, InputTier.SERVICE, InputTier.AGENT):
+            commands = app.command_registry.commands_for_tier(tier)
+            if commands:
+                commands_by_tier[tier.value] = commands
+
+        app.renderer.render_help(commands_by_tier)
+        output = _output(buf)
+
+        assert "/help" in output
+        assert "/quit" in output
+        assert "/agents" in output
+        assert "/tokens" in output
+        assert "/spawn" in output
+
+    def test_agents_list_shows_agent_names(self) -> None:
+        buf = io.StringIO()
+        console = Console(file=buf, force_terminal=True, width=120)
+        renderer = ChatRenderer(console, TuiTheme())
+
+        agents = [
+            {"id": "homelab", "description": "Server management"},
+            {"id": "finance", "description": "Budget tracking"},
+            {"id": "huginn", "description": "Router agent"},
+        ]
+        renderer.render_agents_list(agents, current_agent="huginn")
+        output = _output(buf)
+
+        assert "@homelab" in output
+        assert "@finance" in output
+        assert "@huginn" in output
+        assert "●" in output  # current agent marker

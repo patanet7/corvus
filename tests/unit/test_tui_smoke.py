@@ -153,10 +153,11 @@ class TestEventHandlerUpdatesAgentStatus:
 
         assert app.agent_stack.current.status is AgentStatus.THINKING
 
-        # Verify renderer produced output
-        output = buf.getvalue()
-        assert "homelab" in output
-        assert "thinking" in output
+        # Thinking spinner is a Live display (transient), verify it started
+        assert renderer._thinking_live is not None
+
+        # Clean up spinner
+        renderer._stop_thinking()
 
 
 class TestCommandRouterEndToEnd:

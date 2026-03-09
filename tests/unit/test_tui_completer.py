@@ -169,6 +169,80 @@ class TestToolCompletions:
         assert all(c.start_position == -3 for c in completions)
 
 
+# -- /command argument completions -----------------------------------------
+
+
+class TestCommandArgCompletions:
+    """Commands like /agent, /enter, /spawn complete agent names as args."""
+
+    def test_agent_command_space_lists_all_agents(self) -> None:
+        completer = _build_completer()
+        results = _complete(completer, "/agent ")
+        assert sorted(results) == ["finance", "homelab", "personal", "work"]
+
+    def test_agent_command_partial_filters(self) -> None:
+        completer = _build_completer()
+        results = _complete(completer, "/agent ho")
+        assert results == ["homelab"]
+
+    def test_agent_command_no_match(self) -> None:
+        completer = _build_completer()
+        results = _complete(completer, "/agent zzz")
+        assert results == []
+
+    def test_enter_command_completes_agents(self) -> None:
+        completer = _build_completer()
+        results = _complete(completer, "/enter fi")
+        assert results == ["finance"]
+
+    def test_spawn_command_completes_agents(self) -> None:
+        completer = _build_completer()
+        results = _complete(completer, "/spawn ")
+        assert sorted(results) == ["finance", "homelab", "personal", "work"]
+
+    def test_kill_command_completes_agents(self) -> None:
+        completer = _build_completer()
+        results = _complete(completer, "/kill wo")
+        assert results == ["work"]
+
+    def test_summon_command_completes_agents(self) -> None:
+        completer = _build_completer()
+        results = _complete(completer, "/summon per")
+        assert results == ["personal"]
+
+    def test_non_agent_command_no_arg_completion(self) -> None:
+        """Commands without agent args don't get agent completion."""
+        completer = _build_completer()
+        results = _complete(completer, "/help ")
+        assert results == []
+
+    def test_quit_command_no_arg_completion(self) -> None:
+        completer = _build_completer()
+        results = _complete(completer, "/quit ")
+        assert results == []
+
+    def test_agent_arg_completion_has_meta(self) -> None:
+        completer = _build_completer()
+        doc = Document("/agent ho", cursor_position=9)
+        completions = list(completer.get_completions(doc, None))
+        assert len(completions) == 1
+        assert completions[0].text == "homelab"
+        assert completions[0].display_meta_text == "agent"
+
+    def test_agent_arg_start_position(self) -> None:
+        completer = _build_completer()
+        doc = Document("/agent ho", cursor_position=9)
+        completions = list(completer.get_completions(doc, None))
+        assert len(completions) == 1
+        assert completions[0].start_position == -2  # replaces "ho"
+
+    def test_agent_arg_updates_dynamically(self) -> None:
+        completer = _build_completer()
+        completer.update_agents(["alpha", "beta"])
+        results = _complete(completer, "/agent ")
+        assert sorted(results) == ["alpha", "beta"]
+
+
 # -- Edge cases ------------------------------------------------------------
 
 

@@ -3,9 +3,8 @@
 Uses a real StubGateway implementation of GatewayProtocol — no mocks.
 """
 
-import asyncio
 from collections.abc import Callable, Coroutine
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 
 import pytest
@@ -19,7 +18,7 @@ from corvus.tui.protocol.events import ProtocolEvent
 # StubGateway — real GatewayProtocol implementation with canned data
 # ---------------------------------------------------------------------------
 
-_NOW = datetime(2026, 3, 8, 14, 30, 0, tzinfo=timezone.utc)
+_NOW = datetime(2026, 3, 8, 14, 30, 0, tzinfo=UTC)
 
 _CANNED_SESSIONS: list[SessionSummary] = [
     SessionSummary(
@@ -63,7 +62,7 @@ class StubGateway(GatewayProtocol):
     async def disconnect(self) -> None:
         self._connected = False
 
-    async def send_message(self, text: str, *, session_id: str | None = None) -> None:
+    async def send_message(self, text: str, *, session_id: str | None = None, requested_agent: str | None = None) -> None:
         pass
 
     async def respond_confirm(self, tool_id: str, approved: bool) -> None:
@@ -71,6 +70,21 @@ class StubGateway(GatewayProtocol):
 
     async def cancel_run(self, run_id: str) -> None:
         pass
+
+    async def memory_search(self, query: str, agent_name: str, limit: int = 10) -> list[dict[str, Any]]:
+        return []
+
+    async def memory_list(self, agent_name: str, limit: int = 20) -> list[dict[str, Any]]:
+        return []
+
+    async def memory_save(self, content: str, agent_name: str) -> str:
+        return "stub-id"
+
+    async def memory_forget(self, record_id: str, agent_name: str) -> bool:
+        return True
+
+    async def list_agent_tools(self, agent_name: str) -> list[dict[str, Any]]:
+        return []
 
     async def list_sessions(self) -> list[SessionSummary]:
         return list(self._sessions)
