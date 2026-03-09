@@ -240,9 +240,10 @@ class TuiApp:
         self.parser.update_agents(agent_names)
 
         if agent_names:
-            default_agent = agent_names[0]
+            # Default to huginn (router) — it will dispatch to the right agent
+            default_agent = "huginn" if "huginn" in agent_names else agent_names[0]
             self.agent_stack.push(default_agent, session_id="")
-            self.renderer.render_system(f"Ready. Current agent: @{default_agent}")
+            self.renderer.render_system(f"Ready. Talking to @{default_agent} ({len(agent_names)} agents available)")
         else:
             self.renderer.render_system("Ready. No agents loaded.")
 
