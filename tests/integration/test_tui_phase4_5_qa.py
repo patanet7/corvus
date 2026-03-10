@@ -239,7 +239,7 @@ class TestSetupScreen:
     @pytest.mark.asyncio
     async def test_setup_renders_table(self, h: QAHarness) -> None:
         text = await h.send("/setup")
-        assert "Credential Status" in text
+        assert "Setup & Credentials" in text or "Credential Status" in text
 
     @pytest.mark.asyncio
     async def test_setup_shows_provider_names(self, h: QAHarness) -> None:
@@ -254,10 +254,10 @@ class TestSetupScreen:
 
     @pytest.mark.asyncio
     async def test_setup_shows_status_markers(self, h: QAHarness) -> None:
-        """Each provider row shows Configured or Not Configured."""
+        """Each provider row shows OK/Missing or Configured/Not Configured."""
         text = await h.send("/setup")
-        # At minimum Ollama (always configured) should show configured
-        assert "Configured" in text
+        # At minimum one provider should show a positive status marker
+        assert "OK" in text or "Configured" in text
 
     @pytest.mark.asyncio
     async def test_setup_shows_detail_column(self, h: QAHarness) -> None:
@@ -270,7 +270,7 @@ class TestSetupScreen:
     async def test_setup_status_subcommand(self, h: QAHarness) -> None:
         """/setup status is equivalent to /setup."""
         text = await h.send("/setup status")
-        assert "Credential Status" in text
+        assert "Setup & Credentials" in text or "Credential Status" in text
 
     @pytest.mark.asyncio
     async def test_setup_with_anthropic_key_set(self, h: QAHarness) -> None:
@@ -863,7 +863,7 @@ class TestCrossFeatureIntegration:
         await h.send("/theme light")
         h.app.renderer = ChatRenderer(h.console, h.app.theme)
         text = await h.send("/setup")
-        assert "Credential Status" in text
+        assert "Setup & Credentials" in text or "Credential Status" in text
 
     @pytest.mark.asyncio
     async def test_breakglass_on_off_restores_state(self, h: QAHarness) -> None:

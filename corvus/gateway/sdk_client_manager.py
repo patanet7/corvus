@@ -476,37 +476,34 @@ class SDKClientManager:
         result = mc.client.get_server_info()
         return result if result is not None else {}
 
+    async def _safe_disconnect(self, mc: ManagedClient) -> None:
+        """Disconnect a client with timeout, catching expected errors."""
+        try:
+            await asyncio.wait_for(mc.client.disconnect(), timeout=5.0)
+        except (RuntimeError, asyncio.CancelledError, asyncio.TimeoutError) as exc:
+            # anyio cancel scope errors, CancelledError, and timeouts are
+            # expected when teardown happens across different tasks or the
+            # subprocess is unresponsive.
+            logger.debug(
+                "disconnect_graceful_failure",
+                session_id=mc.session_id,
+                agent_name=mc.agent_name,
+                error=type(exc).__name__,
+            )
+        except Exception:
+            logger.warning(
+                "disconnect_error",
+                session_id=mc.session_id,
+                agent_name=mc.agent_name,
+                exc_info=True,
+            )
+
     async def teardown_session(self, session_id: str) -> int:
         """Tear down all clients in a session. Returns count of clients torn down."""
         clients = self._collect_session_clients(session_id)
         for mc in clients:
             if mc.client is not None:
-                try:
-                    await mc.client.disconnect()
-                except RuntimeError as exc:
-                    # anyio cancel scope errors are expected when teardown happens
-                    # across different tasks (e.g. server shutdown vs client task)
-                    if "cancel scope" in str(exc):
-                        logger.debug(
-                            "cancel_scope_mismatch_during_disconnect",
-                            session_id=mc.session_id,
-                            agent_name=mc.agent_name,
-                        )
-                    else:
-                        logger.warning(
-                            "disconnect_error",
-                            session_id=mc.session_id,
-                            agent_name=mc.agent_name,
-                            error=str(exc),
-                            exc_info=True,
-                        )
-                except Exception:
-                    logger.warning(
-                        "disconnect_error",
-                        session_id=mc.session_id,
-                        agent_name=mc.agent_name,
-                        exc_info=True,
-                    )
+                await self._safe_disconnect(mc)
         return len(clients)
 
     async def teardown_all(self) -> int:
@@ -523,15 +520,7 @@ class SDKClientManager:
         evicted = self._collect_all_idle()
         for mc in evicted:
             if mc.client is not None:
-                try:
-                    await mc.client.disconnect()
-                except Exception:
-                    logger.warning(
-                        "idle_client_disconnect_error",
-                        session_id=mc.session_id,
-                        agent_name=mc.agent_name,
-                        exc_info=True,
-                    )
+                await self._safe_disconnect(mc)
         return len(evicted)
 
     # ── Eviction loop ────────────────────────────────────────────────

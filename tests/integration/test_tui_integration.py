@@ -605,7 +605,7 @@ class TestServiceCommands:
     @pytest.mark.asyncio
     async def test_memory_search_no_results(self, harness):
         text = await harness.send("/memory search zzzzz")
-        assert "No results" in text
+        assert "No memories found" in text or "No results" in text
 
     @pytest.mark.asyncio
     async def test_memory_list(self, harness):

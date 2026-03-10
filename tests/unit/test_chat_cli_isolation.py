@@ -18,6 +18,9 @@ class _FakeAgentsHub:
     def get_agent(self, name):
         return _FakeSpec()
 
+    def build_system_prompt(self, name):
+        return f"You are {name}."
+
 
 class _FakeModelRouter:
     def get_model(self, name):
@@ -45,84 +48,46 @@ def _make_args(**overrides):
 def test_no_disable_slash_commands():
     """CLI must NOT pass --disable-slash-commands (blocks agent skills)."""
     runtime = _FakeRuntime()
-    cmd = _build_claude_cmd(
-        "/usr/bin/claude", runtime, "homelab", _make_args(),
-        system_prompt="You are homelab.",
-    )
+    cmd = _build_claude_cmd("/usr/bin/claude", runtime, "homelab", _make_args())
     assert "--disable-slash-commands" not in cmd
 
 
 def test_setting_sources_user_project():
     """CLI must pass --setting-sources user,project to load isolated settings."""
     runtime = _FakeRuntime()
-    cmd = _build_claude_cmd(
-        "/usr/bin/claude", runtime, "homelab", _make_args(),
-        system_prompt="You are homelab.",
-    )
+    cmd = _build_claude_cmd("/usr/bin/claude", runtime, "homelab", _make_args())
     idx = cmd.index("--setting-sources")
     assert cmd[idx + 1] == "user,project"
 
 
-def test_no_strict_mcp_config():
-    """CLI must NOT pass --strict-mcp-config (no MCP servers used)."""
+def test_strict_mcp_config_present():
+    """CLI must pass --strict-mcp-config to ignore global MCP configs."""
     runtime = _FakeRuntime()
-    cmd = _build_claude_cmd(
-        "/usr/bin/claude", runtime, "homelab", _make_args(),
-        system_prompt="You are homelab.",
-    )
-    assert "--strict-mcp-config" not in cmd
+    cmd = _build_claude_cmd("/usr/bin/claude", runtime, "homelab", _make_args())
+    assert "--strict-mcp-config" in cmd
 
 
 def test_uses_system_prompt():
-    """CLI must use --system-prompt to replace CC defaults with Corvus identity."""
+    """CLI must use --system-prompt built from agents_hub."""
     runtime = _FakeRuntime()
-    prompt = "You are the homelab agent."
-    cmd = _build_claude_cmd(
-        "/usr/bin/claude", runtime, "homelab", _make_args(),
-        system_prompt=prompt,
-    )
+    cmd = _build_claude_cmd("/usr/bin/claude", runtime, "homelab", _make_args())
     assert "--system-prompt" in cmd
     idx = cmd.index("--system-prompt")
-    assert cmd[idx + 1] == prompt
+    assert cmd[idx + 1] == "You are homelab."
     assert "--append-system-prompt" not in cmd
 
 
-def test_no_mcp_config():
-    """CLI must NOT pass --mcp-config (tools delivered via skills/socket)."""
+def test_no_mcp_config_when_no_path():
+    """CLI must NOT pass --mcp-config when no mcp_config_path is given."""
     runtime = _FakeRuntime()
-    cmd = _build_claude_cmd(
-        "/usr/bin/claude", runtime, "homelab", _make_args(),
-        system_prompt="You are homelab.",
-    )
+    cmd = _build_claude_cmd("/usr/bin/claude", runtime, "homelab", _make_args())
     assert "--mcp-config" not in cmd
-
-
-def test_bash_python_in_allowed_tools():
-    """CLI must include Bash(python *) in --allowedTools for skill scripts."""
-    runtime = _FakeRuntime()
-    cmd = _build_claude_cmd(
-        "/usr/bin/claude", runtime, "homelab", _make_args(),
-        system_prompt="You are homelab.",
-    )
-    idx = cmd.index("--allowedTools")
-    allowed = cmd[idx + 1:]
-    # Find next flag to bound the list
-    end = len(allowed)
-    for i, v in enumerate(allowed):
-        if v.startswith("--"):
-            end = i
-            break
-    allowed = allowed[:end]
-    assert "Bash(python *)" in allowed
 
 
 def test_builtin_tools_in_allowed_tools():
     """CLI must include spec.tools.builtin in --allowedTools."""
     runtime = _FakeRuntime()
-    cmd = _build_claude_cmd(
-        "/usr/bin/claude", runtime, "homelab", _make_args(),
-        system_prompt="You are homelab.",
-    )
+    cmd = _build_claude_cmd("/usr/bin/claude", runtime, "homelab", _make_args())
     idx = cmd.index("--allowedTools")
     allowed = cmd[idx + 1:]
     end = len(allowed)

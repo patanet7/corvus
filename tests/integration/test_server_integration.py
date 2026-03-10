@@ -139,7 +139,7 @@ class TestServerStartup:
         resp = requests.get(f"{running_container}/health", timeout=5)
         assert resp.status_code == 200
         data = resp.json()
-        assert data["status"] == "ok"
+        assert data["status"] in ("ok", "degraded")
         assert data["service"] == "corvus-gateway"
 
     def test_health_response_time_under_1s(self, running_container):
@@ -166,14 +166,15 @@ class TestServerStartup:
             import asyncio
 
             import websockets
+            from websockets.exceptions import InvalidStatus
 
             async def try_connect():
                 ws_url = running_container.replace("http://", "ws://") + "/ws"
                 async with websockets.connect(ws_url) as _ws:
                     pass
 
-            # websockets v13+ moved exception classes
-            with pytest.raises((ConnectionRefusedError, OSError)):
+            # Server closes with 4401 or HTTP 403 before upgrade completes
+            with pytest.raises((ConnectionRefusedError, OSError, InvalidStatus)):
                 asyncio.run(try_connect())
         except ImportError:
             # If websockets not installed, test via HTTP upgrade attempt

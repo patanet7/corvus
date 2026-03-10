@@ -37,7 +37,8 @@ class TestInjectWithProfiles:
         store.inject()
         assert os.environ.get("ANTHROPIC_API_KEY") == "sk-flat-key"
 
-    def test_inject_setup_token_as_api_key(self) -> None:
+    def test_inject_setup_token_as_oauth(self) -> None:
+        """OAuth setup tokens (sk-ant-oat*) route to CLAUDE_CODE_OAUTH_TOKEN."""
         store = CredentialStore.from_env()
         store._data = {}
         profiles = AuthProfileStore()
@@ -47,4 +48,4 @@ class TestInjectWithProfiles:
         store.set_auth_profiles(profiles)
 
         store.inject()
-        assert os.environ.get("ANTHROPIC_API_KEY") == "sk-ant-oat01-test-token"
+        assert os.environ.get("CLAUDE_CODE_OAUTH_TOKEN") == "sk-ant-oat01-test-token"
