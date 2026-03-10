@@ -380,6 +380,22 @@ class ChatSession:
 
             if msg.get("type") == "interrupt":
                 logger.info("User interrupted session %s", self.session_id)
+                # Interrupt via SDK client manager
+                if self._current_turn is not None:
+                    self._current_turn.dispatch_interrupted.set()
+                    # Try SDK-level interrupt for all active agents
+                    for client_info in self.runtime.sdk_client_manager.list_active_clients():
+                        if client_info.session_id == self.session_id and client_info.active_run:
+                            try:
+                                await self.runtime.sdk_client_manager.interrupt(
+                                    self.session_id, client_info.agent_name,
+                                )
+                            except Exception:
+                                logger.warning(
+                                    "SDK interrupt failed for %s/%s",
+                                    self.session_id, client_info.agent_name,
+                                    exc_info=True,
+                                )
                 await self.runtime.emitter.emit("session_interrupt", user=self.user, session_id=self.session_id)
                 continue
 
