@@ -13,6 +13,7 @@ import logging
 import time
 from collections.abc import AsyncIterable, Callable
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any
 
 from claude_agent_sdk import ClaudeAgentOptions, ClaudeSDKClient
@@ -120,6 +121,44 @@ class ClientInfo:
     total_cost_usd: float
     idle_seconds: float
     team_name: str | None
+
+
+@dataclass
+class TeamContext:
+    """Metadata for an active agent team."""
+
+    team_name: str
+    session_id: str
+    members: dict[str, ManagedClient]
+    inbox_dir: Path
+    task_dir: Path
+    created_at: float = field(default_factory=time.monotonic)
+    inbox_monitor_task: asyncio.Task[None] | None = field(default=None, repr=False)
+
+
+@dataclass
+class TeamMessage:
+    """A message between team members."""
+
+    from_agent: str
+    to_agent: str | None  # None = broadcast
+    text: str
+    summary: str
+    timestamp: str
+    read: bool
+    message_type: str  # "message" | "broadcast" | "shutdown_request" | etc.
+
+
+@dataclass
+class TeamTask:
+    """A task in the shared team task list."""
+
+    id: str
+    subject: str
+    description: str
+    status: str  # "pending" | "in_progress" | "completed"
+    owner: str | None
+    blocked_by: list[str] = field(default_factory=list)
 
 
 class SDKClientManager:
