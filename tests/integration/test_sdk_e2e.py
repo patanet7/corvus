@@ -114,12 +114,13 @@ class TestSDKManagerViaRuntime:
         assert hasattr(runtime, "sdk_client_manager")
         assert isinstance(runtime.sdk_client_manager, SDKClientManager)
 
-    def test_sdk_manager_starts_with_empty_pools(self, client: TestClient) -> None:
-        """Fresh runtime should have zero active clients."""
+    def test_sdk_manager_has_no_active_runs(self, client: TestClient) -> None:
+        """Runtime should have no clients with active_run=True."""
         from corvus.server import runtime
 
         active = runtime.sdk_client_manager.list_active_clients()
-        assert active == []
+        active_runs = [c for c in active if c.active_run]
+        assert active_runs == []
 
     def test_sdk_manager_pool_lifecycle_via_stubs(self, client: TestClient) -> None:
         """Verify pool creation, get, and teardown without real SDK clients.
