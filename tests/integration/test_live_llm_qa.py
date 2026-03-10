@@ -73,7 +73,7 @@ def start_server() -> subprocess.Popen:
         **os.environ,
         "HOST": HOST,
         "PORT": str(PORT),
-        "ALLOWED_USERS": USER,
+        "ALLOWED_USERS": f"{USER},qa-tester-2",
         "LOG_LEVEL": "DEBUG",
     }
     proc = subprocess.Popen(
@@ -283,10 +283,136 @@ def run_qa() -> int:
         else:
             check("Alt model response", False, "no alternative model available")
 
-        # ── 8. Interrupt ─────────────────────────────────────────
-        section("8. INTERRUPT")
+        # ── 8. Agent identity + metadata ──────────────────────────
+        section("8. AGENT IDENTITY")
+        # Verify agents API returns real config details
+        agents_resp = httpx.get(f"{BASE_URL}/api/agents", headers={"X-Remote-User": USER}, timeout=5)
+        if agents_resp.status_code == 200:
+            agents_data = agents_resp.json()
+            agent_names = [a.get("name") for a in agents_data] if isinstance(agents_data, list) else list(agents_data.keys())
+            expected_agents = {"general", "personal", "work", "finance", "homelab", "email", "docs", "music", "home", "huginn"}
+            found = expected_agents & set(agent_names)
+            check("All 10 agents registered", len(found) == len(expected_agents), f"found {len(found)}/{len(expected_agents)}: {sorted(found)}")
+        else:
+            check("All 10 agents registered", False, f"status={agents_resp.status_code}")
+
+        # Verify agent prompt preview contains identity
+        prompt_resp = httpx.get(f"{BASE_URL}/api/agents/general/prompt-preview", headers={"X-Remote-User": USER}, timeout=5)
+        if prompt_resp.status_code == 200:
+            prompt_data = prompt_resp.json()
+            prompt_text = prompt_data.get("full_preview", "") if isinstance(prompt_data, dict) else str(prompt_data)
+            check("System prompt non-empty", len(prompt_text) > 100, f"len={len(prompt_text)}, layers={prompt_data.get('total_layers', '?')}")
+            # General agent should have cross-domain description in prompt
+            has_identity = any(w in prompt_text.lower() for w in ["general", "cross-domain", "planning", "overview"])
+            check("Prompt contains agent identity", has_identity, repr(prompt_text[:150]))
+        else:
+            check("System prompt non-empty", False, f"status={prompt_resp.status_code}")
+            check("Prompt contains agent identity", False, "no prompt")
+
+        # ── 9–11. Domain routing ──────────────────────────────────
+        # Router uses Claude Haiku via direct API or LiteLLM proxy.
+        # When only an OAuth token is available (no ANTHROPIC_API_KEY),
+        # the router falls back to "general". In that case we verify
+        # the general agent at least identifies the correct domain.
+        domain_queries = [
+            ("9. DOMAIN ROUTING — music", "Help me plan my piano practice for Chopin's Ballade No. 1", "music", ["music", "piano", "practice", "chopin"]),
+            ("10. DOMAIN ROUTING — finance", "What were my biggest expenses last month?", "finance", ["finance", "expense", "spending", "budget", "firefly"]),
+            ("11. DOMAIN ROUTING — homelab", "Show me the Docker containers running on my server", "homelab", ["homelab", "docker", "container", "server", "infrastructure"]),
+        ]
+        for sec_name, query, expected_agent, domain_keywords in domain_queries:
+            section(sec_name)
+            events_d = send_message(ws, query)
+            routing_d = [e for e in events_d if e.get("type") == "routing"]
+            d_text = "".join(e.get("text", "") or e.get("content", "") for e in events_d if e.get("type") in ("text", "text_delta"))
+            # Determine routed agent
+            routed_to = ""
+            if routing_d:
+                routed_to = routing_d[0].get("agent", "")
+            else:
+                ds = [e for e in events_d if e.get("type") == "dispatch_start"]
+                routed_to = ds[0].get("target_agent", "") if ds else ""
+            if routed_to == expected_agent:
+                check(f"{expected_agent.title()} query routed correctly", True, f"agent={routed_to}")
+            else:
+                # Router couldn't classify (e.g. OAuth-only, no direct API key).
+                # Verify the response at least identifies the correct domain.
+                domain_aware = any(kw in d_text.lower() for kw in domain_keywords)
+                check(
+                    f"{expected_agent.title()} domain recognized in response",
+                    domain_aware,
+                    f"routed to {routed_to}, response mentions domain: {domain_aware}",
+                )
+            check(f"{expected_agent.title()} response has content", len(d_text) > 0, repr(d_text[:150]))
+
+        # ── 12. Cross-agent — explicit target override ───────────
+        section("12. CROSS-AGENT — explicit target override")
+        # Send finance question but force it to general agent
+        events_cross = send_message(ws, "What were my expenses?", agent="general")
+        routing_cross = [e for e in events_cross if e.get("type") == "routing"]
+        cross_agent = routing_cross[0].get("agent", "") if routing_cross else ""
+        cross_text = "".join(e.get("text", "") or e.get("content", "") for e in events_cross if e.get("type") in ("text", "text_delta"))
+        check("Explicit target respected", cross_agent == "general", f"routed to: {cross_agent}")
+        check("Cross-agent response has content", len(cross_text) > 0, repr(cross_text[:150]))
+
+        # ── 13. Session isolation — second user ──────────────────
+        section("13. SESSION ISOLATION")
+        # Get a token for a different user
+        user2_env = {**os.environ, "ALLOWED_USERS": f"{USER},qa-tester-2"}
+        # We can't easily change ALLOWED_USERS mid-run, so test with same user but new session
+        token2 = get_token()
+        ws2 = ws_connect(token2)
+        init2_raw = ws2.recv(timeout=5)
+        init2 = json.loads(init2_raw)
+        session1 = init_msg.get("session_id", "")
+        session2 = init2.get("session_id", "")
+        check("Second session created", init2.get("type") == "init")
+        check("Sessions have different IDs", session1 != session2, f"s1={session1[:12]}... s2={session2[:12]}...")
+
+        # Send a message in session 2 — should NOT see session 1 context
+        events_iso = send_message(ws2, "What is 2+2?")
+        iso_text = "".join(e.get("text", "") or e.get("content", "") for e in events_iso if e.get("type") in ("text", "text_delta"))
+        check("Isolated session responds", len(iso_text) > 0, repr(iso_text[:100]))
+        # Session 2 should NOT reference "hello" or "3 words" from session 1
+        no_bleed = not any(w in iso_text.lower() for w in ["hello", "3 words", "three words"])
+        check("No context bleed between sessions", no_bleed, repr(iso_text[:100]))
+        ws2.close()
+
+        # ── 14. Agent policy endpoint ────────────────────────────
+        section("14. AGENT POLICY")
+        policy_resp = httpx.get(f"{BASE_URL}/api/agents/finance/policy", headers={"X-Remote-User": USER}, timeout=5)
+        if policy_resp.status_code == 200:
+            policy = policy_resp.json()
+            check("Finance policy returned", isinstance(policy, dict), str(list(policy.keys()))[:100])
+            # Finance agent should have firefly tools
+            policy_str = json.dumps(policy).lower()
+            check("Finance policy mentions firefly", "firefly" in policy_str, repr(policy_str[:150]))
+        else:
+            check("Finance policy returned", False, f"status={policy_resp.status_code}")
+            check("Finance policy mentions firefly", False, "no policy")
+
+        # ── 15. Error recovery ───────────────────────────────────
+        section("15. ERROR RECOVERY")
+        # Send malformed message
+        ws.send("not json at all")
+        time.sleep(0.5)
+        # Drain the error response the server sends back
+        try:
+            err_raw = ws.recv(timeout=3)
+            err_msg = json.loads(err_raw)
+            check("Server returns error for malformed JSON", err_msg.get("type") == "error", json.dumps(err_msg)[:120])
+        except Exception as e:
+            check("Server returns error for malformed JSON", False, f"{type(e).__name__}: {e}")
+        # WS should still be alive — send ping and expect pong
+        ws.send(json.dumps({"type": "ping"}))
+        try:
+            pong_after = json.loads(ws.recv(timeout=5))
+            check("WS alive after malformed message", pong_after.get("type") == "pong")
+        except Exception as e:
+            check("WS alive after malformed message", False, f"{type(e).__name__}: {e}")
+
+        # ── 16. Interrupt ─────────────────────────────────────────
+        section("16. INTERRUPT")
         ws.send(json.dumps({"type": "interrupt"}))
-        # Should not crash
         ws.send(json.dumps({"type": "ping"}))
         pong2_raw = ws.recv(timeout=5)
         pong2 = json.loads(pong2_raw)

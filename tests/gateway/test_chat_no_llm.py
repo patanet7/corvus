@@ -22,6 +22,7 @@ def test_chat_without_llm_returns_error(monkeypatch):
     # Clear all LLM env vars
     llm_vars = [
         "ANTHROPIC_API_KEY",
+        "CLAUDE_CODE_OAUTH_TOKEN",
         "OPENAI_API_KEY",
         "OLLAMA_BASE_URL",
         "KIMI_BOT_TOKEN",
@@ -46,7 +47,7 @@ def test_any_llm_configured_returns_true_when_set(monkeypatch):
     from corvus.server import _any_llm_configured
 
     # Clear all first
-    for var in ["ANTHROPIC_API_KEY", "OPENAI_API_KEY", "OLLAMA_BASE_URL", "KIMI_BOT_TOKEN", "OPENAI_COMPAT_BASE_URL"]:
+    for var in ["ANTHROPIC_API_KEY", "CLAUDE_CODE_OAUTH_TOKEN", "OPENAI_API_KEY", "OLLAMA_BASE_URL", "KIMI_BOT_TOKEN", "OPENAI_COMPAT_BASE_URL"]:
         monkeypatch.delenv(var, raising=False)
 
     assert _any_llm_configured() is False
@@ -59,7 +60,7 @@ def test_any_llm_configured_returns_false_when_none_set(monkeypatch):
     """_any_llm_configured() should return False when no LLM env vars are set."""
     from corvus.server import _any_llm_configured
 
-    for var in ["ANTHROPIC_API_KEY", "OPENAI_API_KEY", "OLLAMA_BASE_URL", "KIMI_BOT_TOKEN", "OPENAI_COMPAT_BASE_URL"]:
+    for var in ["ANTHROPIC_API_KEY", "CLAUDE_CODE_OAUTH_TOKEN", "OPENAI_API_KEY", "OLLAMA_BASE_URL", "KIMI_BOT_TOKEN", "OPENAI_COMPAT_BASE_URL"]:
         monkeypatch.delenv(var, raising=False)
 
     assert _any_llm_configured() is False

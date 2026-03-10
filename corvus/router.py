@@ -7,14 +7,14 @@ so we know which agent (and therefore which model backend) to use.
 
 from __future__ import annotations
 
-import logging
 import os
 import re
 from typing import Protocol
 
 import anthropic
+import structlog
 
-logger = logging.getLogger("corvus-gateway.router")
+logger = structlog.get_logger(__name__)
 
 # Fallback agent set used when no AgentRegistry is provided.
 # Production always uses registry.list_enabled() via get_valid_agents().
@@ -67,10 +67,30 @@ class RouterAgent:
         base_url: str | None = None,
         registry: _AgentRegistryProtocol | None = None,
     ) -> None:
-        self._api_key = api_key or os.environ.get("ANTHROPIC_API_KEY", "")
-        self._model = model or os.environ.get("ROUTER_MODEL", ROUTER_MODEL_DEFAULT)
-        self._base_url = base_url or os.environ.get("ANTHROPIC_BASE_URL") or None
+        # Store explicit overrides; env vars are read lazily at classify()
+        # time because ANTHROPIC_BASE_URL may not be set yet (LiteLLM starts
+        # after build_runtime).
+        self._explicit_api_key = api_key
+        self._explicit_model = model
+        self._explicit_base_url = base_url
         self._registry = registry
+
+    @property
+    def _api_key(self) -> str:
+        return (
+            self._explicit_api_key
+            or os.environ.get("ANTHROPIC_API_KEY")
+            or os.environ.get("CLAUDE_CODE_OAUTH_TOKEN")
+            or ""
+        )
+
+    @property
+    def _model(self) -> str:
+        return self._explicit_model or os.environ.get("ROUTER_MODEL", ROUTER_MODEL_DEFAULT)
+
+    @property
+    def _base_url(self) -> str | None:
+        return self._explicit_base_url or os.environ.get("ANTHROPIC_BASE_URL") or None
 
     def get_valid_agents(self) -> set[str]:
         """Return the set of valid agent names.
@@ -136,17 +156,20 @@ class RouterAgent:
             block = response.content[0] if response.content else None
             result_text = block.text if block is not None and hasattr(block, "text") else ""
             agent = self.parse_response(result_text)
-            logger.info("Routed message to agent=%s (raw=%r)", agent, result_text)
+            logger.info("router_classified", agent=agent, raw=result_text)
             return agent
         except anthropic.AuthenticationError:
-            logger.error("Router authentication failed — check ANTHROPIC_API_KEY")
-            raise
+            logger.error(
+                "router_auth_failed",
+                hint="check ANTHROPIC_API_KEY or CLAUDE_CODE_OAUTH_TOKEN (OAuth tokens require LiteLLM proxy via ANTHROPIC_BASE_URL)",
+            )
+            return "general"
         except anthropic.RateLimitError:
-            logger.warning("Router rate-limited, defaulting to general")
+            logger.warning("router_rate_limited", fallback="general")
             return "general"
         except (anthropic.APIConnectionError, anthropic.APITimeoutError):
-            logger.warning("Router connection/timeout error, defaulting to general")
+            logger.warning("router_connection_error", fallback="general")
             return "general"
         except Exception:
-            logger.exception("Router classification failed unexpectedly, defaulting to general")
+            logger.exception("router_classification_failed", fallback="general")
             return "general"
