@@ -9,8 +9,7 @@ Design doc: docs/specs/active/2026-03-09-sdk-integration-redesign.md
 from __future__ import annotations
 
 import logging
-import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 from claude_agent_sdk.types import (

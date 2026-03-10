@@ -127,8 +127,8 @@ class TestStreamEventHandling:
             {"type": "content_block_delta", "delta": {"type": "text_delta", "text": "sub"}},
             parent_tool_use_id="parent-tool-1",
         )
-        is_sub = event.parent_tool_use_id is not None
-        assert is_sub is True
+        action = proc._buffer_stream_event(event)
+        assert action["subagent"] is True
 
     def test_finalize_result(self):
         proc = StreamProcessor._create_for_test()
