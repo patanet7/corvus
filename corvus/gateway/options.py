@@ -78,6 +78,22 @@ def resolve_claude_runtime_home(
     return root / "users" / safe_user / "shared"
 
 
+# Environment variables passed through to the SDK subprocess.
+# Security: allowlist only — never blocklist. Only safe, non-secret system vars
+# plus LLM provider keys that the subprocess needs to authenticate.
+_SDK_ENV_PASSTHROUGH: frozenset[str] = frozenset({
+    # System essentials
+    "PATH", "SHELL", "TERM", "LANG", "LC_ALL",
+    "TMPDIR", "USER", "LOGNAME",
+    # LLM provider credentials (injected by SOPS credential store)
+    "ANTHROPIC_API_KEY", "ANTHROPIC_BASE_URL",
+    "OPENAI_API_KEY", "OLLAMA_BASE_URL",
+    "KIMI_BOT_TOKEN",
+    "OPENAI_COMPAT_BASE_URL", "OPENAI_COMPAT_API_KEY",
+    "CODEX_API_KEY",
+})
+
+
 def apply_claude_runtime_env(
     opts: ClaudeAgentOptions,
     *,
@@ -85,7 +101,19 @@ def apply_claude_runtime_env(
     runtime_home: str | Path = CLAUDE_RUNTIME_HOME,
     config_template: str | Path = CLAUDE_CONFIG_TEMPLATE,
 ) -> None:
-    """Scope Claude CLI state under deployment-local runtime home."""
+    """Scope Claude CLI state under deployment-local runtime home.
+
+    Seeds opts.env with the allowlisted parent-process env vars so the SDK
+    subprocess can find PATH, LLM credentials, etc. Then overrides HOME and
+    XDG paths to the isolated runtime directory.
+    """
+    # Seed allowlisted env vars from the parent process so the SDK subprocess
+    # inherits PATH, ANTHROPIC_API_KEY, etc.
+    for key in _SDK_ENV_PASSTHROUGH:
+        val = os.environ.get(key)
+        if val is not None:
+            opts.env[key] = val
+
     if not isolate:
         return
 
@@ -106,7 +134,7 @@ def apply_claude_runtime_env(
             # Seed minimal config to avoid first-run CLI warnings about missing config.
             config_json.write_text("{}\n", encoding="utf-8")
 
-    # Ensure SDK subprocess does not write to user-global ~/.claude.
+    # Override HOME and XDG paths so SDK subprocess writes to isolated runtime dir.
     opts.env["HOME"] = str(home)
     opts.env["CLAUDE_CONFIG_DIR"] = str(claude_config)
     opts.env["XDG_CONFIG_HOME"] = str(xdg_config)
