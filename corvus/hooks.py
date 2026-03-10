@@ -1,14 +1,11 @@
-"""Security and logging hooks for the Corvus gateway.
+"""Event-emitting hooks for the Corvus gateway.
 
 Uses HookMatcher from claude_agent_sdk to intercept tool calls.
-
-TODO: The Bash blocklist (ENV_PATTERNS / check_bash_safety) is superseded by
-permissions.deny + no-Bash-access in the MCP stdio server and tool_catalog.
-The hook infrastructure (create_hooks, pre/post_tool_use) is still used by
-the gateway path (corvus/gateway/options.py -> build_hooks).
+Security enforcement (deny lists, secret access) is handled by
+permissions.deny + tool_catalog — hooks focus on event emission
+and WebSocket forwarding.
 """
 
-import re
 import time
 import uuid as _uuid
 from collections.abc import Awaitable, Callable
@@ -23,36 +20,6 @@ logger = structlog.get_logger(__name__)
 # Type alias for WebSocket forwarding callback
 WSCallback = Callable[[dict], Awaitable[None]]
 
-# --- Security check functions (pure, testable) ---
-
-ENV_PATTERNS = re.compile(
-    r"cat\s+.*\.env|head\s+.*\.env|tail\s+.*\.env|"
-    r"less\s+.*\.env|more\s+.*\.env|strings\s+.*\.env|"
-    r"source\s+.*\.env|\.\s+.*\.env|"
-    r"sed\s+.*\.env|awk\s+.*\.env|"
-    r"grep\s+.*\.env.*secret|"
-    r"find\s+.*\.env.*-exec|"
-    r"\.secrets/|"
-    r"(^|\s)(printenv|env)(\s|$)|"
-    r"(^|\s)set(\s|$)",
-    re.IGNORECASE,
-)
-
-
-def check_bash_safety(command: str) -> str:
-    """Check if a Bash command is safe to execute. Returns 'ALLOWED' or 'BLOCKED'."""
-    if ENV_PATTERNS.search(command):
-        return "BLOCKED"
-    return "ALLOWED"
-
-
-def check_read_safety(file_path: str) -> str:
-    """Check if a file path is safe to read. Returns 'ALLOWED' or 'BLOCKED'."""
-    if file_path.endswith(".env") or "/.env" in file_path or ".secrets/" in file_path:
-        return "BLOCKED"
-    return "ALLOWED"
-
-
 # --- EventEmitter-based hook factory ---
 
 
@@ -60,8 +27,6 @@ def create_hooks(
     emitter: EventEmitter,
     *,
     ws_callback: WSCallback | None = None,
-    confirm_gated: set[str] | None = None,
-    allow_secret_access: bool = False,
 ) -> dict:
     """Create hook functions that emit events via the given EventEmitter.
 
@@ -70,16 +35,9 @@ def create_hooks(
         ws_callback: Optional async callable(msg_dict) for WebSocket forwarding.
             When provided, tool_start and tool_result messages are forwarded to
             the connected WebSocket client.
-        confirm_gated: Deprecated/unused in hooks. Confirm-gating is now handled
-            by the can_use_tool callback in options.py via ConfirmQueue. Kept for
-            backward compatibility of the function signature.
-        allow_secret_access: When True, bypass .env / secrets security blocks
-            (break-glass mode).
 
     Returns dict with 'pre_tool_use' and 'post_tool_use' async callables.
     """
-    gated_tools = confirm_gated if confirm_gated is not None else set()
-
     # Shared context between pre and post hooks so tool_result call_id
     # matches the tool_start call_id for the same invocation.
     # Keyed by tool_use_id (SDK-provided) for correct correlation.
@@ -91,18 +49,6 @@ def create_hooks(
         tool_name = input_data.get("tool_name", "")
         tool_input = input_data.get("tool_input", {})
 
-        # Bash safety check
-        command = tool_input.get("command", "")
-        if not allow_secret_access and command and check_bash_safety(command) == "BLOCKED":
-            await emitter.emit("security_block", tool=tool_name, reason="env_read", tool_use_id=tool_use_id)
-            return {"decision": "block", "reason": "Reading .env files or secrets is prohibited."}
-
-        # Read safety check
-        file_path = tool_input.get("file_path", "")
-        if not allow_secret_access and file_path and check_read_safety(file_path) == "BLOCKED":
-            await emitter.emit("security_block", tool=tool_name, reason="env_read", tool_use_id=tool_use_id)
-            return {"decision": "block", "reason": "Reading .env files is prohibited."}
-
         # Use SDK tool_use_id as call_id when available, otherwise generate one.
         call_id = tool_use_id if tool_use_id else str(_uuid.uuid4())[:8]
 
@@ -113,9 +59,7 @@ def create_hooks(
             "start_time": time.monotonic(),
         }
 
-        # Confirm-gating is handled by can_use_tool callback (options.py).
-
-        # Emit tool_start for frontend (non-blocked, non-gated tools)
+        # Emit tool_start for frontend
         if ws_callback:
             await ws_callback(
                 {

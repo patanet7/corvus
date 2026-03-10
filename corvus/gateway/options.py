@@ -160,8 +160,6 @@ def build_hooks(
     runtime: GatewayRuntime,
     websocket: WebSocket | None = None,
     ws_callback: Callable[[dict[str, Any]], Awaitable[None]] | None = None,
-    confirm_gated: set[str] | None = None,
-    allow_secret_access: bool = False,
 ) -> dict[str, list[HookMatcher]]:
     """Build hook config using EventEmitter-backed hooks."""
 
@@ -181,8 +179,6 @@ def build_hooks(
     event_hooks = create_hooks(
         runtime.emitter,
         ws_callback=ws_forward if (websocket or ws_callback) else None,
-        confirm_gated=confirm_gated,
-        allow_secret_access=allow_secret_access,
     )
     return {
         "PreToolUse": [
@@ -259,8 +255,6 @@ def build_options(
             runtime=runtime,
             websocket=websocket,
             ws_callback=ws_callback,
-            confirm_gated=gated,
-            allow_secret_access=allow_secret_access,
         ),
         "permission_mode": permission_mode,
     }

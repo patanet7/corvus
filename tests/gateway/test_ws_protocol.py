@@ -188,7 +188,7 @@ class TestHookToolEvents:
         async def ws_cb(msg):
             collected.append(msg)
 
-        hooks = create_hooks(emitter, ws_callback=ws_cb, confirm_gated={"mcp__email__email_send"})
+        hooks = create_hooks(emitter, ws_callback=ws_cb)
 
         result = asyncio.run(
             hooks["pre_tool_use"](
@@ -230,8 +230,8 @@ class TestHookToolEvents:
         assert tool_results[0]["status"] == "success"
         assert "call_id" in tool_results[0]
 
-    def test_blocked_tool_does_not_emit_tool_start(self):
-        """pre_tool_use hook does NOT emit tool_start for blocked tools."""
+    def test_env_commands_pass_through_hooks(self):
+        """Hooks pass through all commands — security is in permissions.deny."""
         emitter = EventEmitter()
         collected = []
 
@@ -248,15 +248,15 @@ class TestHookToolEvents:
             )
         )
 
-        assert result["decision"] == "block"
-        # No tool_start should be emitted for blocked tools
+        assert result == {}
+        # tool_start IS emitted (hooks no longer block)
         tool_starts = [m for m in collected if m["type"] == "tool_start"]
-        assert len(tool_starts) == 0
+        assert len(tool_starts) == 1
 
     def test_hooks_work_without_ws_callback(self):
         """Hooks still work correctly when ws_callback is None (backward compat)."""
         emitter = EventEmitter()
-        hooks = create_hooks(emitter, confirm_gated={"mcp__email__email_send"})
+        hooks = create_hooks(emitter)
 
         # Non-gated tool
         result = asyncio.run(
@@ -400,7 +400,7 @@ class TestCallIdMatching:
         async def ws_cb(msg):
             collected.append(msg)
 
-        hooks = create_hooks(emitter, ws_callback=ws_cb, confirm_gated={"mcp__email__email_send"})
+        hooks = create_hooks(emitter, ws_callback=ws_cb)
         tool_use_id = "confirm-tool-001"
 
         # Pre hook: emits tool_start (confirm-gating moved to can_use_tool)
@@ -713,10 +713,10 @@ class TestWSServerSourceContracts:
         source = self._load_options_source()
         assert "ws_forward_connection_closed" in source
 
-    def test_phase2_interrupt_todo_noted(self):
-        """chat router keeps TODO for async queue interrupt improvement."""
+    def test_interrupt_handling_in_chat_session(self):
+        """Interrupt handling is delegated to ChatSession (not inline in chat.py)."""
         source = self._load_chat_source()
-        assert "TODO(phase2)" in source
+        assert "ChatSession" in source
 
 
 SWAG_CONF = (

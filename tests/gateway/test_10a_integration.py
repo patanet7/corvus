@@ -94,7 +94,7 @@ class TestFullStackIntegration:
         log = tmp_path / "events.jsonl"
         emitter = EventEmitter()
         emitter.register_sink(JSONLFileSink(log))
-        hooks = create_hooks(emitter, confirm_gated={"mcp__ha__ha_call_service"})
+        hooks = create_hooks(emitter)
 
         result = asyncio.run(
             hooks["pre_tool_use"](
@@ -114,8 +114,8 @@ class TestFullStackIntegration:
                     event = json.loads(line)
                     assert event["event_type"] != "confirm_gate"
 
-    def test_security_block_emits_event(self, tmp_path: Path):
-        """PreToolUse blocks .env reads AND emits security_block event."""
+    def test_hooks_pass_through_env_reads(self, tmp_path: Path):
+        """Hooks pass through .env reads — security enforcement is in permissions.deny."""
         log = tmp_path / "events.jsonl"
         emitter = EventEmitter()
         emitter.register_sink(JSONLFileSink(log))
@@ -128,10 +128,11 @@ class TestFullStackIntegration:
                 None,
             )
         )
-        assert result["decision"] == "block"
-
-        event = json.loads(log.read_text().strip())
-        assert event["event_type"] == "security_block"
+        assert result == {}
+        # No security_block event should be emitted
+        if log.exists():
+            content = log.read_text().strip()
+            assert content == "" or "security_block" not in content
 
     def test_supervisor_heartbeat_with_mixed_health(self, tmp_path: Path):
         """Supervisor correctly reports mixed healthy/unhealthy providers."""

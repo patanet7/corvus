@@ -95,7 +95,6 @@ def _require_session_auth() -> SessionAuthManager:
 @router.websocket("/ws")
 async def websocket_chat(websocket: WebSocket):
     """WebSocket endpoint for persistent chat sessions."""
-    # TODO(phase2): Replace serial interrupt handling with async queue orchestration.
     runtime = _require_runtime()
 
     # Auth BEFORE accept — reject unauthorized connections at protocol level.

@@ -1,6 +1,6 @@
 ---
 subsystem: memory
-last_verified: 2026-03-09
+last_verified: 2026-03-10
 ---
 
 # Memory System Overview
@@ -13,6 +13,7 @@ MemoryHub is the central coordinator for the Corvus memory system. It enforces d
 - Write enforcement: agents can only write to their `own_domain` or `"shared"`; unknown agents default to read-only shared access.
 - Overlay writes are fan-out best-effort with consecutive failure tracking per overlay instance.
 - Temporal decay is exponential with configurable `decay_half_life_days` (default 30); records with `importance >= evergreen_threshold` (default 0.9) are exempt.
+- MMR (Maximum Marginal Relevance) diversity re-ranking runs after temporal decay, using `config.mmr_lambda` (default 0.7) to balance relevance vs diversity. Uses Jaccard token-overlap similarity. `mmr_lambda=1.0` disables diversity (pure relevance).
 - `seed_context()` is synchronous for prompt composition; fetches up to `limit * 2` records, applies decay, sorts evergreen-first then by score.
 - `create_memory_toolkit()` returns 5 MemoryTool objects (search, save, get, list, forget) with `agent_name` captured in closures.
 - MemoryConfig loads from YAML via `from_file()` with safe fallback to defaults; primary DB defaults to `.data/memory/main.sqlite`.
@@ -24,7 +25,7 @@ MemoryHub is the central coordinator for the Corvus memory system. It enforces d
 
 - **Depends on:** `corvus.memory.backends.fts5`, `corvus.memory.backends.cognee`, `corvus.memory.config`, `corvus.memory.record`
 - **Consumed by:** `corvus.agents.hub.AgentsHub` (prompt seeding, toolkit creation, resolver wiring), `corvus.tui` (via GatewayProtocol memory operations)
-- **Does NOT:** embed vectors, run MMR diversity re-ranking (deferred TODO), or handle cross-domain writes
+- **Does NOT:** embed vectors or handle cross-domain writes
 
 ## Structure
 

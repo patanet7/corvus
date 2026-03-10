@@ -255,11 +255,10 @@ class MemoryHub:
         # Apply temporal decay
         results = self._apply_temporal_decay(results)
 
-        # TODO: MMR diversity re-ranking (config.mmr_lambda) — deferred to follow-up
+        # MMR diversity re-ranking
+        results = self._apply_mmr(results, limit)
 
-        # Sort by final score and limit
-        results.sort(key=lambda r: r.score, reverse=True)
-        return results[:limit]
+        return results
 
     async def get(
         self,
@@ -388,6 +387,69 @@ class MemoryHub:
                 logger.debug("decay_skipped", record_id=r.id, created_at=r.created_at)
 
         return results
+
+    def _apply_mmr(
+        self,
+        results: list[MemoryRecord],
+        limit: int,
+    ) -> list[MemoryRecord]:
+        """Apply Maximum Marginal Relevance re-ranking for diversity.
+
+        Iteratively selects records that balance relevance (score) with
+        diversity (dissimilarity to already-selected records).  Uses
+        simple token-overlap similarity as an efficient proxy — no
+        embedding vectors required.
+
+        ``config.mmr_lambda`` controls the trade-off:
+          - 1.0 = pure relevance (no diversity penalty)
+          - 0.0 = pure diversity (ignores relevance)
+        """
+        if not results or limit <= 0:
+            return []
+
+        lam = self.config.mmr_lambda
+
+        # Fast path: pure relevance — just sort and slice
+        if lam >= 1.0:
+            results.sort(key=lambda r: r.score, reverse=True)
+            return results[:limit]
+
+        # Pre-compute token sets for similarity
+        token_sets: dict[str, set[str]] = {}
+        for r in results:
+            token_sets[r.id] = set(r.content.lower().split())
+
+        selected: list[MemoryRecord] = []
+        remaining = list(results)
+
+        for _ in range(min(limit, len(remaining))):
+            best_idx = 0
+            best_mmr = -1.0
+
+            for i, candidate in enumerate(remaining):
+                relevance = candidate.score
+
+                # Max similarity to any already-selected record
+                max_sim = 0.0
+                c_tokens = token_sets.get(candidate.id, set())
+                for sel in selected:
+                    s_tokens = token_sets.get(sel.id, set())
+                    if c_tokens and s_tokens:
+                        intersection = len(c_tokens & s_tokens)
+                        union = len(c_tokens | s_tokens)
+                        if union > 0:
+                            sim = intersection / union
+                            if sim > max_sim:
+                                max_sim = sim
+
+                mmr_score = lam * relevance - (1.0 - lam) * max_sim
+                if mmr_score > best_mmr:
+                    best_mmr = mmr_score
+                    best_idx = i
+
+            selected.append(remaining.pop(best_idx))
+
+        return selected
 
     def seed_context(
         self,
