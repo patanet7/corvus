@@ -9,7 +9,7 @@ Design doc: docs/specs/active/2026-03-09-sdk-integration-redesign.md
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any
 
 logger = logging.getLogger("corvus-gateway.stream")
@@ -26,7 +26,7 @@ class RunContext:
     turn_id: str
     agent_name: str
     model_id: str
-    route_payload: dict
+    route_payload: dict[str, Any]
 
 
 @dataclass
