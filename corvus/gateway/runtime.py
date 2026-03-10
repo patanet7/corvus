@@ -34,6 +34,7 @@ from corvus.config import (
 from corvus.credential_store import get_credential_store
 from corvus.events import EventEmitter, JSONLFileSink
 from corvus.gateway.control_plane import BreakGlassSessionRegistry, DispatchControlRegistry
+from corvus.gateway.sdk_client_manager import SDKClientManager
 from corvus.gateway.task_planner import TaskPlanner
 from corvus.gateway.trace_hub import TraceHub
 from corvus.litellm_manager import LiteLLMManager
@@ -69,6 +70,7 @@ class GatewayRuntime:
     dispatch_controls: DispatchControlRegistry
     break_glass: BreakGlassSessionRegistry
     acp_registry: AcpAgentRegistry
+    sdk_client_manager: SDKClientManager
     active_connections: set[WebSocket]
 
 
@@ -221,10 +223,12 @@ def build_runtime() -> GatewayRuntime:
     acp_registry.load()
     logger.info("AcpAgentRegistry loaded %d agents", len(acp_registry.list_agents()))
 
+    sdk_client_manager = SDKClientManager(runtime=None)
+
     active_connections: set[WebSocket] = set()
     scheduler.set_connections(active_connections)
 
-    return GatewayRuntime(
+    rt = GatewayRuntime(
         emitter=emitter,
         model_router=model_router,
         litellm_manager=litellm_manager,
@@ -241,5 +245,8 @@ def build_runtime() -> GatewayRuntime:
         dispatch_controls=dispatch_controls,
         break_glass=break_glass,
         acp_registry=acp_registry,
+        sdk_client_manager=sdk_client_manager,
         active_connections=active_connections,
     )
+    sdk_client_manager.set_runtime(rt)
+    return rt

@@ -451,6 +451,44 @@ class SessionManager:
         return self.list(limit=limit, offset=offset, agent_filter=agent_name, user=user)
 
     # ------------------------------------------------------------------
+    # SDK session ID persistence (for session resume)
+    # ------------------------------------------------------------------
+
+    def _ensure_sdk_sessions_table(self) -> None:
+        conn = self._get_conn()
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS sdk_sessions (
+                session_id TEXT NOT NULL,
+                agent_name TEXT NOT NULL,
+                sdk_session_id TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                PRIMARY KEY (session_id, agent_name)
+            )
+        """)
+        conn.commit()
+
+    def store_sdk_session_id(self, session_id: str, agent_name: str, sdk_session_id: str) -> None:
+        """Store or update the SDK session ID for a session/agent pair."""
+        self._ensure_sdk_sessions_table()
+        conn = self._get_conn()
+        conn.execute(
+            """INSERT OR REPLACE INTO sdk_sessions (session_id, agent_name, sdk_session_id, updated_at)
+               VALUES (?, ?, ?, datetime('now'))""",
+            (session_id, agent_name, sdk_session_id),
+        )
+        conn.commit()
+
+    def get_sdk_session_id(self, session_id: str, agent_name: str) -> str | None:
+        """Get the stored SDK session ID for a session/agent pair, or None."""
+        self._ensure_sdk_sessions_table()
+        conn = self._get_conn()
+        row = conn.execute(
+            "SELECT sdk_session_id FROM sdk_sessions WHERE session_id = ? AND agent_name = ?",
+            (session_id, agent_name),
+        ).fetchone()
+        return row[0] if row else None
+
+    # ------------------------------------------------------------------
     # Export
     # ------------------------------------------------------------------
 

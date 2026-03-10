@@ -74,11 +74,22 @@ class InProcessGateway(GatewayProtocol):
         await self._runtime.scheduler.start()
         logger.info("CronScheduler started")
 
+        # Start SDK client eviction loop
+        self._runtime.sdk_client_manager.start_eviction_loop()
+        logger.info("SDKClientManager eviction loop started")
+
         self._connected = True
         logger.info("In-process gateway connected (full stack)")
 
     async def disconnect(self) -> None:
         """Tear down the runtime — stop LiteLLM, supervisor, scheduler, cleanup workspaces."""
+        # Tear down SDK clients for this session
+        if self._session is not None and self._runtime is not None:
+            try:
+                await self._runtime.sdk_client_manager.teardown_session(self._session.session_id)
+            except Exception:
+                logger.warning("Failed to teardown SDK clients for session %s", self._session.session_id, exc_info=True)
+
         # Clean up session workspaces before tearing down runtime
         if self._session is not None:
             try:
@@ -87,6 +98,10 @@ class InProcessGateway(GatewayProtocol):
                 logger.warning("Failed to cleanup workspaces for session %s", self._session.session_id)
 
         if self._runtime is not None:
+            try:
+                await self._runtime.sdk_client_manager.teardown_all()
+            except Exception as exc:
+                logger.warning("Failed to teardown SDK client manager: %s", exc)
             try:
                 await self._runtime.litellm_manager.stop()
             except Exception as exc:
@@ -212,7 +227,24 @@ class InProcessGateway(GatewayProtocol):
             self._session.confirm_queue.respond(tool_id, approved=approved)
 
     async def cancel_run(self, run_id: str) -> None:
-        """Set the dispatch_interrupted flag on the current turn."""
+        """Interrupt via SDK client first, then fall back to dispatch_interrupted flag."""
+        if self._session is not None and self._runtime is not None:
+            # Try SDK interrupt for the primary agent
+            agent_name = None
+            if self._session.transcript.messages:
+                # Find the last agent used
+                for msg in reversed(self._session.transcript.messages):
+                    if msg.get("agent"):
+                        agent_name = msg["agent"]
+                        break
+            if agent_name:
+                try:
+                    await self._runtime.sdk_client_manager.interrupt(
+                        self._session.session_id, agent_name,
+                    )
+                except Exception:
+                    pass
+        # Fall back to existing interrupt mechanism
         if self._session is not None:
             self._session.interrupt_current_turn()
 

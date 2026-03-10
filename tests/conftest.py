@@ -17,6 +17,10 @@ import tempfile
 from pathlib import Path
 from typing import Any
 
+# Capture CLAUDECODE before any corvus import can strip it (corvus.server
+# removes it via os.environ.pop to allow nested SDK subprocess spawning).
+INSIDE_CLAUDE_CODE: bool = bool(os.environ.get("CLAUDECODE"))
+
 # Set test-safe paths BEFORE any claw module imports, so claw.config picks up
 # writable temp directories instead of /data (which doesn't exist locally).
 _TEST_DATA_DIR = Path(tempfile.mkdtemp(prefix="claw_test_"))

@@ -16,17 +16,19 @@ from uuid import uuid4
 import pytest
 
 from corvus.gateway.chat_session import (
+    ChatSession,
+    TurnContext,
+)
+from corvus.gateway.session_emitter import (
     _PERSISTED_RUN_EVENT_TYPES,
     _PERSISTED_SESSION_EVENT_TYPES,
     _TRACE_EVENT_TYPES,
-    ChatSession,
-    TurnContext,
+    SessionEmitter,
     _optional_str,
     _preview_summary,
     _trace_source_app,
     _trace_summary,
 )
-from corvus.gateway.session_emitter import SessionEmitter
 from corvus.gateway.task_planner import TaskRoute
 from corvus.gateway.trace_hub import TraceHub
 from corvus.session_manager import SessionManager

@@ -192,10 +192,50 @@ async def websocket_chat(websocket: WebSocket):
         except Exception:
             logger.exception("Session memory extraction failed for user=%s", user)
 
-    except Exception:
+    except Exception as exc:
         runtime.active_connections.discard(websocket)
-        logger.exception("Error in chat session")
-        await websocket.close(code=1011, reason="Internal error")
+        logger.exception(
+            "Unhandled error in chat session user=%s session_id=%s error=%s: %s",
+            user,
+            session_id,
+            type(exc).__name__,
+            exc,
+        )
+        # Attempt session cleanup even on unexpected errors
+        try:
+            runtime.session_mgr.end(
+                session_id=session_id,
+                ended_at=datetime.now(UTC),
+                message_count=session.transcript.message_count(),
+                tool_count=session.transcript.tool_count,
+                agents_used=list(session.transcript.agents_used),
+            )
+        except Exception:
+            logger.warning(
+                "Failed to end session during error cleanup session_id=%s",
+                session_id,
+                exc_info=True,
+            )
+        try:
+            await runtime.sdk_client_manager.teardown_session(session_id)
+        except Exception:
+            logger.warning(
+                "Failed to teardown SDK clients during error cleanup session_id=%s",
+                session_id,
+                exc_info=True,
+            )
+        try:
+            cleanup_session_workspaces(session_id=session_id)
+        except Exception:
+            logger.warning(
+                "Failed to cleanup workspaces during error cleanup session_id=%s",
+                session_id,
+                exc_info=True,
+            )
+        try:
+            await websocket.close(code=1011, reason="Internal error")
+        except Exception:
+            pass  # WS may already be closed
 
 
 @router.post("/api/auth/token")

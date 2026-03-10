@@ -10,19 +10,20 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-from collections.abc import Callable, Coroutine
-from typing import Any
-
-from corvus.gateway.confirm_queue import ConfirmQueue
 import uuid
+from collections.abc import Callable, Coroutine
 from dataclasses import dataclass
 from datetime import datetime
+from typing import Any
 
 from fastapi import WebSocket
 
 from corvus.gateway.chat_engine import ChatDispatchResolution, resolve_chat_dispatch, resolve_default_agent
+from corvus.gateway.confirm_queue import ConfirmQueue
 from corvus.gateway.dispatch_orchestrator import (
     dispatch_control_listener as _dispatch_control,
+)
+from corvus.gateway.dispatch_orchestrator import (
     execute_dispatch_lifecycle as _execute_dispatch,
 )
 from corvus.gateway.options import (
@@ -33,13 +34,6 @@ from corvus.gateway.run_executor import execute_agent_run as _execute_run
 from corvus.gateway.runtime import GatewayRuntime
 from corvus.gateway.session_emitter import (
     SessionEmitter,
-    _PERSISTED_RUN_EVENT_TYPES,
-    _PERSISTED_SESSION_EVENT_TYPES,
-    _TRACE_EVENT_TYPES,
-    _optional_str,
-    _preview_summary,
-    _trace_source_app,
-    _trace_summary,
 )
 from corvus.gateway.task_planner import TaskRoute
 from corvus.session import SessionTranscript
@@ -258,6 +252,7 @@ class ChatSession:
             websocket=self.websocket,
             user=self.user,
             confirm_queue=self.confirm_queue,
+            sdk_manager=self.runtime.sdk_client_manager,
         )
 
     # ------------------------------------------------------------------
@@ -379,6 +374,22 @@ class ChatSession:
 
             if msg.get("type") == "interrupt":
                 logger.info("User interrupted session %s", self.session_id)
+                # Interrupt via SDK client manager
+                if self._current_turn is not None:
+                    self._current_turn.dispatch_interrupted.set()
+                    # Try SDK-level interrupt for all active agents
+                    for client_info in self.runtime.sdk_client_manager.list_active_clients():
+                        if client_info.session_id == self.session_id and client_info.active_run:
+                            try:
+                                await self.runtime.sdk_client_manager.interrupt(
+                                    self.session_id, client_info.agent_name,
+                                )
+                            except Exception:
+                                logger.warning(
+                                    "SDK interrupt failed for %s/%s",
+                                    self.session_id, client_info.agent_name,
+                                    exc_info=True,
+                                )
                 await self.runtime.emitter.emit("session_interrupt", user=self.user, session_id=self.session_id)
                 continue
 
