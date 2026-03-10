@@ -147,7 +147,7 @@ class StreamProcessor:
         sdk_session_id: str | None,
         context_limit: int | None = None,
     ) -> RunResult:
-        limit = context_limit or self._context_limit
+        limit = context_limit if context_limit is not None else self._context_limit
         tokens_used = tokens_input + tokens_output
         context_pct = round((tokens_used / limit) * 100, 1) if limit > 0 else 0.0
         return RunResult(
