@@ -118,7 +118,13 @@ async def lifespan(_app: FastAPI) -> AsyncGenerator[None]:
     await runtime.scheduler.start()
     logger.info("CronScheduler started with %d schedules", len(runtime.scheduler.schedules))
 
+    runtime.sdk_client_manager.start_eviction_loop()
+    logger.info("SDKClientManager eviction loop started")
+
     yield
+
+    await runtime.sdk_client_manager.teardown_all()
+    logger.info("SDKClientManager torn down")
 
     await runtime.litellm_manager.stop()
 

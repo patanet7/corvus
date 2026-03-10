@@ -136,6 +136,10 @@ class SDKClientManager:
         self._idle_timeout = idle_timeout
         self._eviction_task: asyncio.Task[None] | None = None
 
+    def set_runtime(self, runtime: Any) -> None:
+        """Set runtime back-reference after GatewayRuntime construction."""
+        self._runtime = runtime
+
     # ── Pool management ──────────────────────────────────────────────
 
     def _get_pool(self, session_id: str) -> AgentClientPool:

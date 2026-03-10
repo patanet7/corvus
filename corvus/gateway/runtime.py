@@ -13,6 +13,7 @@ from pathlib import Path
 from fastapi import WebSocket
 
 from corvus.acp.registry import AcpAgentRegistry
+from corvus.gateway.sdk_client_manager import SDKClientManager
 from corvus.agents.hub import AgentsHub
 from corvus.agents.registry import AgentRegistry
 from corvus.break_glass import BreakGlassManager
@@ -69,6 +70,7 @@ class GatewayRuntime:
     dispatch_controls: DispatchControlRegistry
     break_glass: BreakGlassSessionRegistry
     acp_registry: AcpAgentRegistry
+    sdk_client_manager: SDKClientManager
     active_connections: set[WebSocket]
 
 
@@ -221,10 +223,12 @@ def build_runtime() -> GatewayRuntime:
     acp_registry.load()
     logger.info("AcpAgentRegistry loaded %d agents", len(acp_registry.list_agents()))
 
+    sdk_client_manager = SDKClientManager(runtime=None)
+
     active_connections: set[WebSocket] = set()
     scheduler.set_connections(active_connections)
 
-    return GatewayRuntime(
+    rt = GatewayRuntime(
         emitter=emitter,
         model_router=model_router,
         litellm_manager=litellm_manager,
@@ -241,5 +245,8 @@ def build_runtime() -> GatewayRuntime:
         dispatch_controls=dispatch_controls,
         break_glass=break_glass,
         acp_registry=acp_registry,
+        sdk_client_manager=sdk_client_manager,
         active_connections=active_connections,
     )
+    sdk_client_manager.set_runtime(rt)
+    return rt
