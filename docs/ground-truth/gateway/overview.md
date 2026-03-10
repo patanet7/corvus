@@ -1,6 +1,6 @@
 ---
 subsystem: gateway
-last_verified: 2026-03-09
+last_verified: 2026-03-10
 ---
 
 # Gateway Overview
@@ -11,11 +11,13 @@ The Corvus gateway is the central runtime orchestrating chat sessions, agent dis
 
 - `GatewayRuntime` is a `@dataclass(slots=True)` holding all long-lived components: `EventEmitter`, `ModelRouter`, `LiteLLMManager`, `AgentRegistry`, `CapabilitiesRegistry`, `MemoryHub`, `AgentsHub`, `RouterAgent`, `SessionManager`, `CronScheduler`, `AgentSupervisor`, `TaskPlanner`, `TraceHub`, `DispatchControlRegistry`, `BreakGlassSessionRegistry`, `AcpAgentRegistry`, and `active_connections`.
 - `build_runtime()` constructs all dependencies, validates startup readiness, and returns a single `GatewayRuntime` instance.
-- The gateway package contains 18 modules: `chat_session`, `chat_engine`, `run_executor`, `dispatch_orchestrator`, `dispatch_runtime`, `dispatch_metrics`, `session_emitter`, `protocol`, `task_planner`, `options`, `runtime`, `control_plane`, `trace_hub`, `confirm_queue`, `background_dispatch`, `acp_executor`, `workspace_runtime`.
+- The gateway package contains 19 modules: `chat_session`, `chat_engine`, `run_executor`, `dispatch_orchestrator`, `dispatch_runtime`, `dispatch_metrics`, `session_emitter`, `protocol`, `task_planner`, `options`, `runtime`, `control_plane`, `trace_hub`, `confirm_queue`, `background_dispatch`, `acp_executor`, `workspace_runtime`, `sdk_client_manager`.
 - `corvus/server.py` is a thin composition root: it calls `build_runtime()`, registers FastAPI routers, and manages lifespan.
-- The current SDK integration creates and destroys a `ClaudeSDKClient` subprocess per message (throwaway pattern in `run_executor.py` and `background_dispatch.py`). A planned `SDKClientManager` will replace this with persistent, pooled clients.
+- `SDKClientManager` manages persistent, pooled `ClaudeSDKClient` subprocess connections. Clients are created per `(session_id, agent_name)` pair and reused across turns. Idle eviction runs on a background loop. `_safe_disconnect()` wraps teardown with a 5-second timeout to prevent hangs from `asyncio.CancelledError`.
+- `ManagedClient` tracks per-client metrics (tokens, cost, tool calls) and checkpoints. `create_stub()` is a test-only factory for exercising pool logic without real subprocesses.
 - Credentials are loaded via SOPS credential store at startup; sanitization patterns are registered for all credential values.
 - LiteLLM proxy handles multi-backend model routing (Claude, Ollama, Kimi, OpenAI/Groq) from `config/models.yaml`.
+- All modules use `structlog` for structured logging (migrated 2026-03-10). Central config lives in `corvus/logging.py` with per-component level filtering and secret scrubbing.
 
 ## Boundaries
 
@@ -35,7 +37,7 @@ graph TD
     SE["SessionEmitter"]
     TP["TaskPlanner"]
     RA["RouterAgent"]
-    SDK["ClaudeSDKClient"]
+    SDK["SDKClientManager"]
     SM["SessionManager<br/>(SQLite)"]
 
     Transport --> CS

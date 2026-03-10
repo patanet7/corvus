@@ -1,6 +1,6 @@
 ---
 subsystem: model-routing
-last_verified: 2026-03-09
+last_verified: 2026-03-10
 ---
 
 # Model Routing — LiteLLM Proxy Architecture
@@ -17,7 +17,7 @@ Corvus routes all model traffic through a LiteLLM proxy running as an embedded s
 - Ollama backends (type `env_swap`) produce an `ollama/*` wildcard entry with the configured `api_base`.
 - Kimi backend (type `proxy`) routes through KimiProxy at `http://localhost:8100` as an `openai/kimi-k2` model.
 - OpenAI and OpenAI-compatible backends are added when present in the `backends:` section.
-- API keys are referenced as `os.environ/VAR_NAME` in generated config, never inlined.
+- API keys are referenced as `os.environ/VAR_NAME` in generated config, never inlined. `_anthropic_api_key_ref()` resolves the correct env var at config generation time: prefers `CLAUDE_CODE_OAUTH_TOKEN` (OAuth setup tokens), falls back to `ANTHROPIC_API_KEY`.
 - Router settings (retries, cooldown, strategy) are read from the `litellm:` section of `models.yaml` with hardcoded defaults (3 retries, 30s cooldown, simple-shuffle).
 - Fallback chains auto-generate: each SDK-native model falls back to `ollama/*` when an Ollama backend is configured.
 - The proxy binds to `127.0.0.1` only; no network exposure.

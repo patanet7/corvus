@@ -1,6 +1,6 @@
 ---
 subsystem: security
-last_verified: 2026-03-09
+last_verified: 2026-03-10
 ---
 
 # Security Architecture Overview
@@ -17,6 +17,7 @@ The `corvus/security/` package implements Corvus's defense-in-depth security lay
 - Tool results are sanitized by `sanitizer.py` before entering agent context (JWTs, API keys, connection strings, auth headers, hex tokens)
 - Break-glass tokens are HMAC-SHA256, session-bound, with configurable TTL (default 1h, max 4h)
 - WebSocket auth uses HMAC-SHA256 session tokens; localhost auto-auth is eliminated
+- Credential store (`corvus/credential_store.py`) loads SOPS-encrypted credentials from `~/.corvus/credentials.json`. OAuth setup tokens (`sk-ant-oat01-*`) are routed to `CLAUDE_CODE_OAUTH_TOKEN`; regular API keys to `ANTHROPIC_API_KEY`. `any_llm_configured()` checks both
 - Session idle timeout (default 30min) can auto-deactivate break-glass
 
 ## Boundaries

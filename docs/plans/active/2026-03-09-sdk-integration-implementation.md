@@ -1,7 +1,7 @@
 ---
 title: "SDK Integration Redesign Implementation Plan"
 type: plan
-status: approved
+status: implemented
 date: 2026-03-09
 review_by: 2026-04-09
 spec: null
