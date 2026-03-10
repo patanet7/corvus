@@ -500,13 +500,22 @@ async def execute_agent_run(
             context_pct=context_pct,
         )
     except Exception as exc:
-        logger.exception("Error processing run agent=%s", agent_name)
-        safe_msg = type(exc).__name__
+        logger.exception(
+            "Error processing run agent=%s run_id=%s session_id=%s error=%s: %s",
+            agent_name,
+            run_id,
+            session_id,
+            type(exc).__name__,
+            exc,
+        )
+        safe_msg = f"{type(exc).__name__}: {exc}"
         await send(
             {
                 "type": "error",
                 "message": f"Internal error: {safe_msg}",
                 "agent": agent_name,
+                "run_id": run_id,
+                "session_id": session_id,
                 **route_pay,
             }
         )

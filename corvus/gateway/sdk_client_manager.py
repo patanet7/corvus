@@ -263,7 +263,16 @@ class SDKClientManager:
     ) -> ManagedClient:
         """Create a new ClaudeSDKClient, connect it, and register in the pool."""
         client = ClaudeSDKClient(options=options)
-        await client.connect()
+        try:
+            await client.connect()
+        except Exception:
+            log.error(
+                "SDK client connect failed for %s/%s — check API key and network",
+                session_id,
+                agent_name,
+                exc_info=True,
+            )
+            raise
         mc = ManagedClient(
             client=client,
             session_id=session_id,
@@ -305,9 +314,21 @@ class SDKClientManager:
         """Send a prompt to a client and return the ManagedClient (caller streams from it)."""
         mc = self._get_existing(session_id, agent_name)
         if mc is None or mc.client is None:
+            log.error("No active client for %s/%s — was get_or_create called?", session_id, agent_name)
             raise RuntimeError(f"No active client for {session_id}/{agent_name}")
         mc.active_run = True
-        await mc.client.query(prompt, session_id=session_id)
+        try:
+            await mc.client.query(prompt, session_id=session_id)
+        except Exception:
+            mc.active_run = False
+            log.error(
+                "SDK query failed for %s/%s — prompt length=%d",
+                session_id,
+                agent_name,
+                len(prompt) if isinstance(prompt, str) else -1,
+                exc_info=True,
+            )
+            raise
         return mc
 
     async def interrupt(self, session_id: str, agent_name: str) -> bool:
@@ -457,6 +478,23 @@ class SDKClientManager:
             if mc.client is not None:
                 try:
                     await mc.client.disconnect()
+                except RuntimeError as exc:
+                    # anyio cancel scope errors are expected when teardown happens
+                    # across different tasks (e.g. server shutdown vs client task)
+                    if "cancel scope" in str(exc):
+                        log.debug(
+                            "Cancel scope mismatch during disconnect %s/%s (safe to ignore)",
+                            mc.session_id,
+                            mc.agent_name,
+                        )
+                    else:
+                        log.warning(
+                            "Error disconnecting client %s/%s: %s",
+                            mc.session_id,
+                            mc.agent_name,
+                            exc,
+                            exc_info=True,
+                        )
                 except Exception:
                     log.warning(
                         "Error disconnecting client %s/%s",
