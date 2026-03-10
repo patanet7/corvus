@@ -46,15 +46,15 @@ _HEALTH_POLL_INTERVAL = 0.5
 def _anthropic_api_key_ref() -> str:
     """Return the ``os.environ/VAR`` reference for the Anthropic API key.
 
-    Prefers ``ANTHROPIC_API_KEY`` when set.  Falls back to
-    ``CLAUDE_CODE_OAUTH_TOKEN`` (OAuth setup tokens work with the
-    Anthropic API when routed through LiteLLM).
+    Prefers ``CLAUDE_CODE_OAUTH_TOKEN`` (the primary credential for
+    Corvus).  Falls back to ``ANTHROPIC_API_KEY`` for direct API key
+    setups.
     """
-    if os.environ.get("ANTHROPIC_API_KEY"):
-        return "os.environ/ANTHROPIC_API_KEY"
     if os.environ.get("CLAUDE_CODE_OAUTH_TOKEN"):
         return "os.environ/CLAUDE_CODE_OAUTH_TOKEN"
-    return "os.environ/ANTHROPIC_API_KEY"  # default ref even if unset
+    if os.environ.get("ANTHROPIC_API_KEY"):
+        return "os.environ/ANTHROPIC_API_KEY"
+    return "os.environ/CLAUDE_CODE_OAUTH_TOKEN"  # default ref even if unset
 
 
 def generate_litellm_config(models_yaml_path: Path) -> dict[str, Any]:
