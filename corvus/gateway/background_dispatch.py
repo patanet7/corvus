@@ -12,8 +12,7 @@ import uuid
 from dataclasses import dataclass
 from datetime import UTC, datetime
 
-from claude_agent_sdk import ClaudeSDKClient
-from claude_agent_sdk.types import AssistantMessage, ResultMessage, TextBlock
+from corvus.gateway.stream_processor import RunContext, StreamProcessor
 
 from corvus.gateway.dispatch_metrics import summarize_dispatch_runs
 from corvus.gateway.dispatch_runtime import execute_dispatch_runs
@@ -347,41 +346,38 @@ async def execute_planned_background_dispatch(
         )
 
         try:
-            async with ClaudeSDKClient(options=client_options) as client:
-                await client.set_model(active_model)
-                await client.query(route_prompt, session_id=session_id)
-                chunk_index = 0
-                async for sdk_message in client.receive_response():
-                    if isinstance(sdk_message, AssistantMessage):
-                        for block in sdk_message.content:
-                            if not isinstance(block, TextBlock):
-                                continue
-                            response_parts.append(block.text)
-                            _persist_run_event(
-                                run_id=run_id,
-                                event_type="run_output_chunk",
-                                payload={
-                                    "type": "run_output_chunk",
-                                    "dispatch_id": dispatch_id,
-                                    "run_id": run_id,
-                                    "task_id": task_id,
-                                    "session_id": session_id,
-                                    "turn_id": turn_id,
-                                    "agent": route.agent,
-                                    "model": active_model_id,
-                                    "chunk_index": chunk_index,
-                                    "content": block.text,
-                                    "final": False,
-                                    **route_payload,
-                                },
-                            )
-                            chunk_index += 1
-                    elif isinstance(sdk_message, ResultMessage):
-                        usage = getattr(sdk_message, "usage", None) or {}
-                        tokens_used = int(usage.get("input_tokens", 0)) + int(
-                            usage.get("output_tokens", 0),
-                        )
-                        total_cost = float(getattr(sdk_message, "total_cost_usd", 0.0) or 0.0)
+            managed = await runtime.sdk_client_manager.get_or_create(
+                session_id, route.agent, lambda: client_options,
+            )
+            managed.immediate_teardown = True
+            managed.active_run = True
+
+            await managed.client.set_model(active_model)
+
+            run_context = RunContext(
+                dispatch_id=dispatch_id, run_id=run_id, task_id=task_id,
+                session_id=session_id, turn_id=turn_id, agent_name=route.agent,
+                model_id=active_model_id, route_payload=route_payload,
+            )
+            processor = StreamProcessor(
+                emitter=None,  # background dispatch persists events directly
+                managed_client=managed,
+                context_limit=context_limit,
+            )
+
+            await runtime.sdk_client_manager.query(session_id, route.agent, route_prompt)
+            result = await processor.process_response(run_context)
+            runtime.sdk_client_manager.release(session_id, route.agent)
+
+            # Store SDK session ID for future resume
+            if result.sdk_session_id:
+                runtime.session_mgr.store_sdk_session_id(
+                    session_id, route.agent, result.sdk_session_id,
+                )
+
+            tokens_used = result.tokens_used
+            total_cost = result.cost_usd
+            response_parts = [result.response_text] if result.response_text else []
 
             assistant_text = " ".join(response_parts).strip()
             if assistant_text:
