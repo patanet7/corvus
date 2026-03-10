@@ -13,15 +13,15 @@ Adding a new provider: add to providers: section in config/models.yaml + set env
 
 from __future__ import annotations
 
-import logging
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
 import httpx
+import structlog
 import yaml
 
-logger = logging.getLogger("corvus-gateway.model_router")
+logger = structlog.get_logger(__name__)
 
 
 @dataclass
@@ -127,7 +127,7 @@ class ModelRouter:
         if not path.exists():
             if strict:
                 raise FileNotFoundError(f"Model config not found at {path}")
-            logger.warning("Model config not found at %s, using defaults", path)
+            logger.warning("model_config_not_found", path=str(path))
             return cls(DEFAULT_CONFIG)
         try:
             with open(path) as f:
@@ -136,12 +136,12 @@ class ModelRouter:
                 config = {}
             if not isinstance(config, dict):
                 raise ValueError(f"Expected YAML mapping in {path}, got {type(config).__name__}")
-            logger.info("Loaded model config from %s", path)
+            logger.info("model_config_loaded", path=str(path))
             return cls(config)
         except Exception:
             if strict:
                 raise
-            logger.exception("Failed to load model config from %s, using defaults", path)
+            logger.exception("model_config_load_failed", path=str(path))
             return cls(DEFAULT_CONFIG)
 
     def get_model(self, agent_name: str) -> str:
@@ -316,10 +316,10 @@ class ModelRouter:
                         )
                     )
                 self._discovered_models = models
-                logger.info("Discovered %d models from LiteLLM proxy", len(models))
+                logger.info("models_discovered_litellm", count=len(models))
                 return
         except Exception:
-            logger.warning("LiteLLM proxy unreachable, falling back to config-based discovery")
+            logger.warning("litellm_proxy_unreachable")
 
         # Fallback: populate from config (for tests and offline scenarios)
         for model_name in sorted(self._sdk_native_models - {"inherit"}):
@@ -337,7 +337,7 @@ class ModelRouter:
                 )
             )
         self._discovered_models = models
-        logger.info("Config-based discovery: %d models", len(models))
+        logger.info("models_discovered_config", count=len(models))
 
     def list_available_models(self) -> list[ModelInfo]:
         """Return all discovered models. Call discover_models() first."""

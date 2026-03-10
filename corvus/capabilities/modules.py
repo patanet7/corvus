@@ -14,8 +14,9 @@ AgentsHub (not via CapabilitiesRegistry). It is intentionally absent from
 TOOL_MODULE_DEFS.
 """
 
-import logging
 import os
+
+import structlog
 from collections.abc import Callable
 from typing import Any, TypedDict, cast
 
@@ -86,7 +87,7 @@ from corvus.tools.paperless import (
 )
 from corvus.yahoo_client import YahooClient
 
-logger = logging.getLogger("corvus.capabilities.modules")
+logger = structlog.get_logger(__name__)
 
 
 class ObsidianModuleConfig(TypedDict, total=False):
@@ -168,13 +169,13 @@ def _email_entry() -> ToolModuleEntry:
             if not google_client.list_accounts():
                 google_client = None
         except (OSError, ValueError) as exc:
-            logger.warning("Google client init failed: %s", exc)
+            logger.warning("google_client_init_failed", error=str(exc))
         try:
             yahoo_client = YahooClient.from_env()
             if not yahoo_client.list_accounts():
                 yahoo_client = None
         except (OSError, ValueError) as exc:
-            logger.warning("Yahoo client init failed: %s", exc)
+            logger.warning("yahoo_client_init_failed", error=str(exc))
         email_configure(google_client=google_client, yahoo_client=yahoo_client)
         cfg["_google_client"] = google_client
         cfg["_yahoo_client"] = yahoo_client
@@ -221,7 +222,7 @@ def _drive_entry() -> ToolModuleEntry:
         try:
             google_client = GoogleClient.from_env()
         except (OSError, ValueError) as exc:
-            logger.warning("Google client init failed for drive: %s", exc)
+            logger.warning("google_client_init_failed", module="drive", error=str(exc))
         if google_client is not None:
             drive_configure(client=google_client)
         cfg["_google_client"] = google_client

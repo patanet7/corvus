@@ -5,11 +5,12 @@ blocklist of dangerous patterns and enforces parent agent policy.
 All terminal commands from ACP agents are confirm-gated.
 """
 
-import logging
 import re
 from dataclasses import dataclass
 
-logger = logging.getLogger(__name__)
+import structlog
+
+logger = structlog.get_logger(__name__)
 
 _BLOCKED_PATTERNS: list[tuple[re.Pattern[str], str]] = [
     # Network tools
@@ -68,7 +69,7 @@ def check_terminal_command(
         A TerminalGateResult indicating whether the command is allowed.
     """
     if not parent_allows_bash:
-        logger.warning("Terminal command denied by parent agent policy: %r", command)
+        logger.warning("terminal_command_denied_by_policy", command=command)
         return TerminalGateResult(
             allowed=False,
             reason="Denied by parent agent policy",
@@ -77,16 +78,14 @@ def check_terminal_command(
 
     for pattern, label in _BLOCKED_PATTERNS:
         if pattern.search(command):
-            logger.warning(
-                "Terminal command blocked by pattern %r: %r", label, command
-            )
+            logger.warning("terminal_command_blocked", pattern=label, command=command)
             return TerminalGateResult(
                 allowed=False,
                 reason=f"Blocked by terminal gate: matched {label!r} pattern",
                 requires_confirm=True,
             )
 
-    logger.info("Terminal command allowed (requires confirmation): %r", command)
+    logger.info("terminal_command_allowed", command=command, requires_confirm=True)
     return TerminalGateResult(
         allowed=True,
         reason="Allowed by terminal gate",

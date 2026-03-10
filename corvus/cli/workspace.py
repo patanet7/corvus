@@ -13,13 +13,14 @@ from __future__ import annotations
 
 import hashlib
 import json
-import logging
 import os
 import shutil
 import tempfile
 from pathlib import Path
 
-logger = logging.getLogger("corvus-workspace")
+import structlog
+
+logger = structlog.get_logger(__name__)
 
 
 def _validate_skill_filename(filename: str, skills_dir: Path) -> None:
@@ -88,8 +89,10 @@ def create_workspace(
         )
 
     logger.info(
-        "Created workspace for %s at %s (session=%s)",
-        agent_name, workspace, session_id,
+        "workspace_created",
+        agent_name=agent_name,
+        workspace=str(workspace),
+        session_id=session_id,
     )
     return workspace
 
@@ -158,10 +161,10 @@ def cleanup_workspace(workspace: Path) -> None:
     if not workspace.exists():
         return
     if not str(workspace).startswith(tempfile.gettempdir()):
-        logger.error("Refusing to delete workspace outside temp dir: %s", workspace)
+        logger.error("workspace_cleanup_refused", workspace=str(workspace))
         return
     shutil.rmtree(workspace, ignore_errors=True)
-    logger.info("Cleaned up workspace at %s", workspace)
+    logger.info("workspace_cleaned_up", workspace=str(workspace))
 
 
 def verify_workspace_integrity(workspace: Path) -> list[str]:

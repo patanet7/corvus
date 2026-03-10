@@ -8,14 +8,14 @@ module provides the handler layer.
 
 from __future__ import annotations
 
-import logging
 import time
 from dataclasses import dataclass, field
 
 from corvus.security.mcp_tool import MCPToolDef
+import structlog
 from corvus.security.tool_context import ToolContext
 
-logger = logging.getLogger("corvus-mcp")
+logger = structlog.get_logger(__name__)
 
 
 @dataclass
@@ -83,7 +83,7 @@ class MCPToolHandler:
         # 1. Tool must be registered
         tool_def = self.tools.get(tool_name)
         if tool_def is None:
-            logger.warning("Tool call for unknown tool: %s", tool_name)
+            logger.warning("tool_call_unknown", tool_name=tool_name)
             return ToolCallResult(
                 tool_name=tool_name,
                 success=False,
@@ -93,9 +93,9 @@ class MCPToolHandler:
         # 2. Check deny list
         if self.ctx and self.ctx.permissions.is_denied(tool_name):
             logger.warning(
-                "Tool %s denied by policy for agent %s",
-                tool_name,
-                self.ctx.agent_name,
+                "tool_call_denied",
+                tool_name=tool_name,
+                agent_name=self.ctx.agent_name,
             )
             return ToolCallResult(
                 tool_name=tool_name,
@@ -108,10 +108,10 @@ class MCPToolHandler:
             result = await tool_def.execute(self.ctx, **params)
             duration = (time.monotonic() - start) * 1000
             logger.info(
-                "Tool %s executed successfully for agent %s (%.1fms)",
-                tool_name,
-                self.ctx.agent_name if self.ctx else "unknown",
-                duration,
+                "tool_call_success",
+                tool_name=tool_name,
+                agent_name=self.ctx.agent_name if self.ctx else "unknown",
+                duration_ms=round(duration, 1),
             )
             return ToolCallResult(
                 tool_name=tool_name,
@@ -122,9 +122,9 @@ class MCPToolHandler:
         except Exception as exc:
             duration = (time.monotonic() - start) * 1000
             logger.exception(
-                "Tool %s failed for agent %s",
-                tool_name,
-                self.ctx.agent_name if self.ctx else "unknown",
+                "tool_call_failed",
+                tool_name=tool_name,
+                agent_name=self.ctx.agent_name if self.ctx else "unknown",
             )
             return ToolCallResult(
                 tool_name=tool_name,

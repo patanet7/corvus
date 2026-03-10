@@ -12,10 +12,11 @@ from __future__ import annotations
 
 import asyncio
 import json
-import logging
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Protocol, TypedDict
+
+import structlog
 
 
 class SecurityBlockEvent(TypedDict):
@@ -44,7 +45,7 @@ class SessionEvent(TypedDict, total=False):
     duration_seconds: float
 
 
-logger = logging.getLogger("corvus-gateway.events")
+logger = structlog.get_logger(__name__)
 
 
 class EventSink(Protocol):
@@ -96,9 +97,9 @@ class EventEmitter:
                 self._sink_failures[id(sink)] = count
                 log_fn = logger.error if count >= self._ERROR_THRESHOLD else logger.warning
                 log_fn(
-                    "Sink %s failed for event %s (consecutive failures: %d)",
-                    type(sink).__name__,
-                    event_type,
-                    count,
+                    "event_sink_failed",
+                    sink=type(sink).__name__,
+                    event_type=event_type,
+                    consecutive_failures=count,
                     exc_info=True,
                 )

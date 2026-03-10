@@ -6,12 +6,13 @@ Validates every file read/write from ACP agents against:
 - Parent agent policy (read/write permissions)
 """
 
-import logging
 import re
 from dataclasses import dataclass
 from pathlib import Path
 
-logger = logging.getLogger(__name__)
+import structlog
+
+logger = structlog.get_logger(__name__)
 
 _SECRET_PATTERNS: list[re.Pattern[str]] = [
     re.compile(r"(^|/)\.env(\..+)?$"),         # .env, .env.local, .env.production
@@ -88,9 +89,9 @@ def check_file_access(
         relative = resolved.relative_to(workspace_resolved)
     except ValueError:
         logger.warning(
-            "File gate blocked %s of %r: escapes workspace boundary",
-            operation,
-            path,
+            "file_gate_blocked_boundary_escape",
+            operation=operation,
+            path=path,
         )
         return FileGateResult(
             allowed=False,
@@ -101,9 +102,9 @@ def check_file_access(
     relative_str = str(relative)
     if not allow_secret_access and _matches_secret_pattern(relative_str):
         logger.warning(
-            "File gate blocked %s of %r: matches secret pattern",
-            operation,
-            path,
+            "file_gate_blocked_secret_pattern",
+            operation=operation,
+            path=path,
         )
         return FileGateResult(
             allowed=False,

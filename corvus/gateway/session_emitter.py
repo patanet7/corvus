@@ -7,7 +7,7 @@ publication.  Pure extraction from chat_session.py — no new behaviour.
 from __future__ import annotations
 
 import asyncio
-import logging
+import structlog
 from collections.abc import Callable, Coroutine
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
@@ -22,7 +22,7 @@ if TYPE_CHECKING:
     from corvus.gateway.chat_session import TurnContext
     from corvus.gateway.runtime import GatewayRuntime
 
-logger = logging.getLogger("corvus-gateway")
+logger = structlog.get_logger(__name__)
 
 
 # ---------------------------------------------------------------------------
@@ -136,9 +136,9 @@ class SessionEmitter:
             )
         except Exception:
             logger.exception(
-                "Failed to persist session event: session_id=%s type=%s",
-                self.session_id,
-                event_type,
+                "persist_session_event_failed",
+                session_id=self.session_id,
+                event_type=event_type,
             )
 
     def _persist_run_event(
@@ -162,9 +162,9 @@ class SessionEmitter:
             )
         except Exception:
             logger.exception(
-                "Failed to persist run event: run_id=%s type=%s",
-                run_id,
-                event_type,
+                "persist_run_event_failed",
+                run_id=run_id,
+                event_type=event_type,
             )
 
     async def _publish_trace(
@@ -195,9 +195,9 @@ class SessionEmitter:
             await self.runtime.trace_hub.publish(user=self.user, event=trace_row)
         except Exception:
             logger.exception(
-                "Failed to persist/publish trace event: session_id=%s type=%s",
-                self.session_id,
-                event_type,
+                "persist_publish_trace_failed",
+                session_id=self.session_id,
+                event_type=event_type,
             )
 
     async def send(

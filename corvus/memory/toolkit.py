@@ -6,7 +6,7 @@ and cannot be overridden by the agent.
 
 from __future__ import annotations
 
-import logging
+import structlog
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -16,7 +16,7 @@ from uuid import uuid4
 from corvus.memory.hub import MemoryHub
 from corvus.memory.record import MemoryRecord
 
-logger = logging.getLogger(__name__)
+logger = structlog.get_logger(__name__)
 
 
 @dataclass

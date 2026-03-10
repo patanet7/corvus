@@ -7,7 +7,7 @@ all dependencies explicitly instead of via ``self``.
 from __future__ import annotations
 
 import asyncio
-import logging
+import structlog
 import uuid
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
@@ -35,7 +35,7 @@ if TYPE_CHECKING:
     from corvus.gateway.task_planner import TaskRoute
     from corvus.session import SessionTranscript
 
-logger = logging.getLogger("corvus-gateway")
+logger = structlog.get_logger(__name__)
 
 
 # ---------------------------------------------------------------------------
@@ -146,7 +146,7 @@ async def execute_agent_run(
             status="queued",
         )
     except Exception:
-        logger.exception("Failed to persist run row run_id=%s", run_id)
+        logger.exception("persist_run_row_failed", run_id=run_id)
 
     # routing event (non-persisted)
     await send(
@@ -301,7 +301,7 @@ async def execute_agent_run(
         try:
             await managed.client.set_model(active_model)
         except Exception as exc:
-            logger.warning("Failed to set model '%s': %s", active_model, exc)
+            logger.warning("set_model_failed", model=active_model, error=str(exc))
             await send(
                 {
                     "type": "error",
@@ -501,12 +501,11 @@ async def execute_agent_run(
         )
     except Exception as exc:
         logger.exception(
-            "Error processing run agent=%s run_id=%s session_id=%s error=%s: %s",
-            agent_name,
-            run_id,
-            session_id,
-            type(exc).__name__,
-            exc,
+            "run_processing_error",
+            agent=agent_name,
+            run_id=run_id,
+            session_id=session_id,
+            error_type=type(exc).__name__,
         )
         safe_msg = f"{type(exc).__name__}: {exc}"
         await send(

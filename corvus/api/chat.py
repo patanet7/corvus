@@ -13,9 +13,10 @@ Protocol contract (enforced by ChatSession, verified by source tests):
 
 from __future__ import annotations
 
-import logging
 import os
 import uuid
+
+import structlog
 from datetime import UTC, datetime
 
 from fastapi import APIRouter, HTTPException, Request, WebSocket, WebSocketDisconnect
@@ -27,7 +28,7 @@ from corvus.gateway.workspace_runtime import cleanup_session_workspaces
 from corvus.security.session_auth import SessionAuthManager
 from corvus.session import extract_session_memories
 
-logger = logging.getLogger("corvus-gateway")
+logger = structlog.get_logger(__name__)
 
 router = APIRouter(tags=["chat"])
 
@@ -49,17 +50,14 @@ def _build_session_auth() -> SessionAuthManager:
     if secret_env:
         secret = secret_env.encode()
     else:
-        logger.warning(
-            "CORVUS_SESSION_SECRET not set — generating ephemeral secret. "
-            "Set this env var for persistent session tokens across restarts."
-        )
+        logger.warning("session_secret_not_set", detail="generating ephemeral secret, set CORVUS_SESSION_SECRET for persistence")
         secret = os.urandom(64)
 
     proxy_ips_raw = os.environ.get("CORVUS_TRUSTED_PROXY_IPS", "")
     trusted_proxy_ips: set[str] = set()
     if proxy_ips_raw.strip():
         trusted_proxy_ips = {ip.strip() for ip in proxy_ips_raw.split(",") if ip.strip()}
-        logger.info("Trusted proxy IPs for header auth: %s", trusted_proxy_ips)
+        logger.info("trusted_proxy_ips_configured", proxy_ips=sorted(trusted_proxy_ips))
 
     return SessionAuthManager(
         secret=secret,
@@ -112,9 +110,7 @@ async def websocket_chat(websocket: WebSocket):
         headers=headers,
     )
     if not auth_result.authenticated:
-        logger.debug(
-            "WebSocket auth denied for %s: %s", client_host, auth_result.reason
-        )
+        logger.debug("ws_auth_denied", client_host=client_host, reason=auth_result.reason)
         await websocket.close(code=4401, reason=auth_result.reason or "Unauthorized")
         return
     user = auth_result.user
@@ -136,11 +132,11 @@ async def websocket_chat(websocket: WebSocket):
 
     if resumed:
         started_at = datetime.now(UTC)
-        logger.info("Resumed chat session for user=%s session_id=%s", user, session_id)
+        logger.info("chat_session_resumed", user=user, session_id=session_id)
     else:
         session_id = str(uuid.uuid4())
         started_at = datetime.now(UTC)
-        logger.info("Chat session started for user=%s session_id=%s", user, session_id)
+        logger.info("chat_session_started", user=user, session_id=session_id)
         runtime.session_mgr.start(session_id, user=user, started_at=started_at)
 
     await runtime.emitter.emit("session_start", user=user, session_id=session_id)
@@ -156,7 +152,7 @@ async def websocket_chat(websocket: WebSocket):
         await session.run(started_at=started_at, resumed_session=resumed_session)
     except WebSocketDisconnect:
         runtime.active_connections.discard(websocket)
-        logger.info("Chat session ended for user=%s session_id=%s", user, session_id)
+        logger.info("chat_session_ended", user=user, session_id=session_id)
         await runtime.emitter.emit(
             "session_end",
             user=user,
@@ -174,12 +170,12 @@ async def websocket_chat(websocket: WebSocket):
                 agents_used=list(session.transcript.agents_used),
             )
         except Exception:
-            logger.exception("Failed to end session %s", session_id)
+            logger.exception("session_end_failed", session_id=session_id)
 
         try:
             cleanup_session_workspaces(session_id=session_id)
         except Exception:
-            logger.warning("Failed to cleanup workspaces for session %s", session_id)
+            logger.warning("workspace_cleanup_failed", session_id=session_id)
 
         try:
             memories = await extract_session_memories(
@@ -188,18 +184,17 @@ async def websocket_chat(websocket: WebSocket):
                 agent_name=session.transcript.primary_agent(),
             )
             if memories:
-                logger.info("Extracted %d memories from session for user=%s", len(memories), user)
+                logger.info("session_memories_extracted", count=len(memories), user=user)
         except Exception:
-            logger.exception("Session memory extraction failed for user=%s", user)
+            logger.exception("session_memory_extraction_failed", user=user)
 
     except Exception as exc:
         runtime.active_connections.discard(websocket)
         logger.exception(
-            "Unhandled error in chat session user=%s session_id=%s error=%s: %s",
-            user,
-            session_id,
-            type(exc).__name__,
-            exc,
+            "chat_session_unhandled_error",
+            user=user,
+            session_id=session_id,
+            error_type=type(exc).__name__,
         )
         # Attempt session cleanup even on unexpected errors
         try:
@@ -211,27 +206,15 @@ async def websocket_chat(websocket: WebSocket):
                 agents_used=list(session.transcript.agents_used),
             )
         except Exception:
-            logger.warning(
-                "Failed to end session during error cleanup session_id=%s",
-                session_id,
-                exc_info=True,
-            )
+            logger.warning("session_end_cleanup_failed", session_id=session_id, exc_info=True)
         try:
             await runtime.sdk_client_manager.teardown_session(session_id)
         except Exception:
-            logger.warning(
-                "Failed to teardown SDK clients during error cleanup session_id=%s",
-                session_id,
-                exc_info=True,
-            )
+            logger.warning("sdk_teardown_cleanup_failed", session_id=session_id, exc_info=True)
         try:
             cleanup_session_workspaces(session_id=session_id)
         except Exception:
-            logger.warning(
-                "Failed to cleanup workspaces during error cleanup session_id=%s",
-                session_id,
-                exc_info=True,
-            )
+            logger.warning("workspace_cleanup_error_path_failed", session_id=session_id, exc_info=True)
         try:
             await websocket.close(code=1011, reason="Internal error")
         except Exception:

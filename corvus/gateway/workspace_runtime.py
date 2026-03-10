@@ -6,7 +6,7 @@ do not run against the live repository checkout by default.
 
 from __future__ import annotations
 
-import logging
+import structlog
 import os
 import re
 import shutil
@@ -15,7 +15,7 @@ from pathlib import Path
 
 from corvus.config import WORKSPACE_DIR
 
-logger = logging.getLogger("corvus-gateway")
+logger = structlog.get_logger(__name__)
 
 _WORKSPACE_ROOT_ENV = "CORVUS_AGENT_WORKSPACE_ROOT"
 _WORKSPACE_SOURCE_ENV = "CORVUS_AGENT_WORKSPACE_SOURCE"
@@ -99,7 +99,7 @@ def prepare_agent_workspace(*, session_id: str, agent_name: str) -> Path:
     workspace_dir.parent.mkdir(parents=True, exist_ok=True)
 
     if not source_root.exists():
-        logger.warning("Workspace source root missing (%s); using empty workspace", source_root)
+        logger.warning("workspace_source_root_missing", source_root=str(source_root))
         workspace_dir.mkdir(parents=True, exist_ok=True)
         return workspace_dir
 
@@ -110,9 +110,9 @@ def prepare_agent_workspace(*, session_id: str, agent_name: str) -> Path:
             return workspace_dir
         except Exception as exc:
             logger.warning(
-                "Failed to create git worktree at %s (%s). Falling back to source snapshot copy.",
-                workspace_dir,
-                exc,
+                "git_worktree_create_failed",
+                workspace_dir=str(workspace_dir),
+                error=str(exc),
             )
             if workspace_dir.exists():
                 shutil.rmtree(workspace_dir)
@@ -120,7 +120,7 @@ def prepare_agent_workspace(*, session_id: str, agent_name: str) -> Path:
     try:
         _copy_source_snapshot(source_root, workspace_dir)
     except Exception:
-        logger.exception("Failed to copy source snapshot to %s; using empty workspace", workspace_dir)
+        logger.exception("source_snapshot_copy_failed", workspace_dir=str(workspace_dir))
         workspace_dir.mkdir(parents=True, exist_ok=True)
 
     return workspace_dir
@@ -150,24 +150,24 @@ def cleanup_agent_workspace(*, session_id: str, agent_name: str) -> None:
             text=True,
         )
         if result.returncode == 0:
-            logger.debug("Removed git worktree: %s", workspace_dir)
+            logger.debug("git_worktree_removed", workspace_dir=str(workspace_dir))
         else:
             # Worktree remove failed — fall back to rmtree
             logger.warning(
-                "git worktree remove failed for %s (%s); falling back to rmtree",
-                workspace_dir,
-                (result.stderr or "").strip(),
+                "git_worktree_remove_failed",
+                workspace_dir=str(workspace_dir),
+                stderr=(result.stderr or "").strip(),
             )
             shutil.rmtree(workspace_dir, ignore_errors=True)
     else:
         shutil.rmtree(workspace_dir, ignore_errors=True)
-        logger.debug("Removed snapshot workspace: %s", workspace_dir)
+        logger.debug("snapshot_workspace_removed", workspace_dir=str(workspace_dir))
 
     # Clean up empty session directory
     session_dir = workspace_dir.parent
     if session_dir.is_dir() and not any(session_dir.iterdir()):
         session_dir.rmdir()
-        logger.debug("Removed empty session dir: %s", session_dir)
+        logger.debug("empty_session_dir_removed", session_dir=str(session_dir))
 
 
 def cleanup_session_workspaces(*, session_id: str) -> None:
@@ -200,7 +200,7 @@ def cleanup_session_workspaces(*, session_id: str) -> None:
         shutil.rmtree(agent_dir, ignore_errors=True)
 
     shutil.rmtree(session_dir, ignore_errors=True)
-    logger.info("Cleaned up session workspaces: %s", session_dir)
+    logger.info("session_workspaces_cleaned", session_dir=str(session_dir))
 
 
 def prune_stale_worktrees() -> int:
@@ -232,7 +232,7 @@ def prune_stale_worktrees() -> int:
     # Count pruned entries from verbose output
     removed = sum(1 for line in result.stdout.splitlines() if line.startswith("Removing"))
     if removed:
-        logger.info("Pruned %d stale worktrees", removed)
+        logger.info("stale_worktrees_pruned", count=removed)
     return removed
 
 
@@ -263,7 +263,7 @@ def copy_agent_skills(
                 if src.exists():
                     shutil.copy2(src, skills_dest / src.name)
                 else:
-                    logger.warning("Shared skill '%s' not found at %s", skill_name, src)
+                    logger.warning("shared_skill_not_found", skill_name=skill_name, path=str(src))
 
     # Tool skills (directory-based, with scripts/)
     tools_src = config_dir / "config" / "skills" / "tools"

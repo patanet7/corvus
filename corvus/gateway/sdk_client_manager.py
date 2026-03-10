@@ -9,7 +9,7 @@ Design doc: docs/specs/active/2026-03-09-sdk-integration-redesign.md
 from __future__ import annotations
 
 import asyncio
-import logging
+import structlog
 import time
 from collections.abc import AsyncIterable, Callable
 from dataclasses import dataclass, field
@@ -18,7 +18,7 @@ from typing import Any
 
 from claude_agent_sdk import ClaudeAgentOptions, ClaudeSDKClient
 
-log = logging.getLogger(__name__)
+logger = structlog.get_logger(__name__)
 
 
 @dataclass
@@ -266,10 +266,10 @@ class SDKClientManager:
         try:
             await client.connect()
         except Exception:
-            log.error(
-                "SDK client connect failed for %s/%s — check API key and network",
-                session_id,
-                agent_name,
+            logger.error(
+                "sdk_client_connect_failed",
+                session_id=session_id,
+                agent_name=agent_name,
                 exc_info=True,
             )
             raise
@@ -286,7 +286,7 @@ class SDKClientManager:
         )
         pool = self._get_pool(session_id)
         pool.add(mc)
-        log.info("Created SDK client for %s/%s", session_id, agent_name)
+        logger.info("sdk_client_created", session_id=session_id, agent_name=agent_name)
         return mc
 
     async def get_or_create(
@@ -314,18 +314,18 @@ class SDKClientManager:
         """Send a prompt to a client and return the ManagedClient (caller streams from it)."""
         mc = self._get_existing(session_id, agent_name)
         if mc is None or mc.client is None:
-            log.error("No active client for %s/%s — was get_or_create called?", session_id, agent_name)
+            logger.error("no_active_client", session_id=session_id, agent_name=agent_name)
             raise RuntimeError(f"No active client for {session_id}/{agent_name}")
         mc.active_run = True
         try:
             await mc.client.query(prompt, session_id=session_id)
         except Exception:
             mc.active_run = False
-            log.error(
-                "SDK query failed for %s/%s — prompt length=%d",
-                session_id,
-                agent_name,
-                len(prompt) if isinstance(prompt, str) else -1,
+            logger.error(
+                "sdk_query_failed",
+                session_id=session_id,
+                agent_name=agent_name,
+                prompt_length=len(prompt) if isinstance(prompt, str) else -1,
                 exc_info=True,
             )
             raise
@@ -339,10 +339,10 @@ class SDKClientManager:
         try:
             mc.client.interrupt()
             mc.active_run = False
-            log.info("Interrupted client %s/%s", session_id, agent_name)
+            logger.info("client_interrupted", session_id=session_id, agent_name=agent_name)
             return True
         except Exception:
-            log.warning("Failed to interrupt %s/%s", session_id, agent_name, exc_info=True)
+            logger.warning("interrupt_failed", session_id=session_id, agent_name=agent_name, exc_info=True)
             return False
 
     async def set_model(self, session_id: str, agent_name: str, model: str) -> None:
@@ -371,7 +371,7 @@ class SDKClientManager:
         options = ClaudeAgentOptions(resume=sdk_session_id)
         mc = await self._create_client(session_id, agent_name, options)
         mc.sdk_session_id = sdk_session_id
-        log.info("Resumed SDK session %s for %s/%s", sdk_session_id, session_id, agent_name)
+        logger.info("sdk_session_resumed", sdk_session_id=sdk_session_id, session_id=session_id, agent_name=agent_name)
         return mc
 
     async def get_or_resume(
@@ -391,9 +391,12 @@ class SDKClientManager:
                 try:
                     return await self.resume_sdk_session(session_id, agent_name, stored_id)
                 except Exception:
-                    log.warning(
-                        "Failed to resume SDK session %s for %s/%s, creating fresh",
-                        stored_id, session_id, agent_name, exc_info=True,
+                    logger.warning(
+                        "sdk_session_resume_failed",
+                        sdk_session_id=stored_id,
+                        session_id=session_id,
+                        agent_name=agent_name,
+                        exc_info=True,
                     )
         options = options_builder()
         return await self._create_client(session_id, agent_name, options)
@@ -412,9 +415,11 @@ class SDKClientManager:
             fork_session=True,
         )
         mc = await self._create_client(target_session_id, agent_name, options)
-        log.info(
-            "Forked SDK session from %s to %s for agent %s",
-            source_session_id, target_session_id, agent_name,
+        logger.info(
+            "sdk_session_forked",
+            source_session_id=source_session_id,
+            target_session_id=target_session_id,
+            agent_name=agent_name,
         )
         return mc
 
@@ -427,11 +432,11 @@ class SDKClientManager:
             return False
         try:
             mc.client.rewind_files(checkpoint_uuid)
-            log.info("Rewound files for %s/%s to checkpoint %s", session_id, agent_name, checkpoint_uuid)
+            logger.info("files_rewound", session_id=session_id, agent_name=agent_name, checkpoint=checkpoint_uuid)
             return True
         except Exception:
-            log.warning(
-                "Failed to rewind files for %s/%s", session_id, agent_name, exc_info=True,
+            logger.warning(
+                "rewind_files_failed", session_id=session_id, agent_name=agent_name, exc_info=True,
             )
             return False
 
@@ -451,7 +456,7 @@ class SDKClientManager:
         MCP servers are configured via ClaudeAgentOptions at creation time.
         This method is a placeholder for future SDK support.
         """
-        log.warning("add_mcp_server not yet supported by SDK — config at creation time instead")
+        logger.warning("add_mcp_server_not_supported")
 
     async def remove_mcp_server(
         self, session_id: str, agent_name: str, server_name: str
@@ -461,7 +466,7 @@ class SDKClientManager:
         Note: ClaudeSDKClient does not have a direct remove_mcp_server method.
         This method is a placeholder for future SDK support.
         """
-        log.warning("remove_mcp_server not yet supported by SDK")
+        logger.warning("remove_mcp_server_not_supported")
 
     async def get_server_info(self, session_id: str, agent_name: str) -> dict[str, Any]:
         """Get server info for a client."""
@@ -482,24 +487,24 @@ class SDKClientManager:
                     # anyio cancel scope errors are expected when teardown happens
                     # across different tasks (e.g. server shutdown vs client task)
                     if "cancel scope" in str(exc):
-                        log.debug(
-                            "Cancel scope mismatch during disconnect %s/%s (safe to ignore)",
-                            mc.session_id,
-                            mc.agent_name,
+                        logger.debug(
+                            "cancel_scope_mismatch_during_disconnect",
+                            session_id=mc.session_id,
+                            agent_name=mc.agent_name,
                         )
                     else:
-                        log.warning(
-                            "Error disconnecting client %s/%s: %s",
-                            mc.session_id,
-                            mc.agent_name,
-                            exc,
+                        logger.warning(
+                            "disconnect_error",
+                            session_id=mc.session_id,
+                            agent_name=mc.agent_name,
+                            error=str(exc),
                             exc_info=True,
                         )
                 except Exception:
-                    log.warning(
-                        "Error disconnecting client %s/%s",
-                        mc.session_id,
-                        mc.agent_name,
+                    logger.warning(
+                        "disconnect_error",
+                        session_id=mc.session_id,
+                        agent_name=mc.agent_name,
                         exc_info=True,
                     )
         return len(clients)
@@ -521,10 +526,10 @@ class SDKClientManager:
                 try:
                     await mc.client.disconnect()
                 except Exception:
-                    log.warning(
-                        "Error disconnecting idle client %s/%s",
-                        mc.session_id,
-                        mc.agent_name,
+                    logger.warning(
+                        "idle_client_disconnect_error",
+                        session_id=mc.session_id,
+                        agent_name=mc.agent_name,
                         exc_info=True,
                     )
         return len(evicted)
@@ -538,11 +543,11 @@ class SDKClientManager:
                 await asyncio.sleep(self._idle_timeout / 2)
                 count = await self.evict_idle()
                 if count > 0:
-                    log.info("Evicted %d idle client(s)", count)
+                    logger.info("idle_clients_evicted", count=count)
             except asyncio.CancelledError:
                 break
             except Exception:
-                log.warning("Error in eviction loop", exc_info=True)
+                logger.warning("eviction_loop_error", exc_info=True)
 
     def start_eviction_loop(self) -> None:
         """Start the background eviction loop."""

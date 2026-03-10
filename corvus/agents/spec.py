@@ -12,13 +12,13 @@ All classes are plain dataclasses (not pydantic) and support:
 - YAML loading via from_yaml()
 """
 
-import logging
+import structlog
 from dataclasses import asdict, dataclass, field, fields
 from pathlib import Path
 
 import yaml
 
-logger = logging.getLogger("corvus-gateway")
+logger = structlog.get_logger(__name__)
 
 
 def _filter_known_fields(cls: type, data: dict) -> dict:
@@ -30,7 +30,7 @@ def _filter_known_fields(cls: type, data: dict) -> dict:
     known = {f.name for f in fields(cls)}
     unknown = set(data) - known
     if unknown:
-        logger.warning("Ignoring unknown %s fields: %s", cls.__name__, sorted(unknown))
+        logger.warning("unknown_dataclass_fields", cls=cls.__name__, fields=sorted(unknown))
     return {k: v for k, v in data.items() if k in known}
 
 

@@ -8,7 +8,7 @@ Corvus's existing SessionEmitter pipeline.
 from __future__ import annotations
 
 import asyncio
-import logging
+import structlog
 import uuid
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
@@ -30,7 +30,7 @@ if TYPE_CHECKING:
     from corvus.gateway.task_planner import TaskRoute
     from corvus.session import SessionTranscript
 
-logger = logging.getLogger("corvus-gateway")
+logger = structlog.get_logger(__name__)
 
 # Module-level session tracker (shared across runs)
 _acp_session_tracker = AcpSessionTracker()
@@ -163,7 +163,7 @@ async def execute_acp_run(
             status="queued",
         )
     except Exception:
-        logger.exception("Failed to persist run row run_id=%s", run_id)
+        logger.exception("persist_run_row_failed", run_id=run_id)
 
     await send({"type": "routing", "agent": agent_name, "model": active_model_id, **route_pay})
     await send(
@@ -545,7 +545,7 @@ async def execute_acp_run(
             context_pct=0.0,
         )
     except Exception as exc:
-        logger.exception("Error in ACP run agent=%s", agent_name)
+        logger.exception("acp_run_error", agent=agent_name)
         safe_msg = type(exc).__name__
         await send({"type": "error", "message": f"ACP error: {safe_msg}", "agent": agent_name, **route_pay})
         return await emit_run_failure(
@@ -563,5 +563,5 @@ async def execute_acp_run(
             try:
                 await client.terminate()
             except Exception:
-                logger.warning("Failed to terminate ACP agent process for run=%s", run_id)
+                logger.warning("acp_terminate_failed", run_id=run_id)
         _acp_session_tracker.remove(run_id)

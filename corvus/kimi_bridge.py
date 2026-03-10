@@ -35,7 +35,6 @@ from __future__ import annotations
 
 import asyncio
 import json
-import logging
 import random
 import time
 from collections.abc import AsyncIterator, Callable, Coroutine
@@ -43,10 +42,11 @@ from dataclasses import dataclass, field
 from enum import Enum, StrEnum
 from typing import Any
 
+import structlog
 import websockets
 import websockets.exceptions
 
-logger = logging.getLogger("corvus-gateway.kimi-bridge")
+logger = structlog.get_logger(__name__)
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -706,7 +706,7 @@ class KimiBridgeClient:
         }
 
         try:
-            logger.info("Connecting to Kimi bridge at %s", self.bridge_url)
+            logger.info("kimi_bridge_connecting", url=self.bridge_url)
             self._ws = await websockets.connect(
                 self.bridge_url,
                 additional_headers=headers,
@@ -718,7 +718,7 @@ class KimiBridgeClient:
             self._reconnect_count = 0
             self._last_data_received = time.monotonic()
             self._connect_event.set()
-            logger.info("Connected to Kimi bridge successfully")
+            logger.info("kimi_bridge_connected")
 
             # Start background tasks
             self._ping_task = asyncio.create_task(self._keepalive_loop(), name="kimi-ping")
@@ -729,16 +729,16 @@ class KimiBridgeClient:
             status = getattr(e.response, "status_code", 0) or getattr(e.response, "status", 0)
             if status == 401:
                 self._auth_failed = True
-                logger.error("Kimi bridge auth failed (HTTP 401) -- will not retry")
+                logger.error("kimi_bridge_auth_failed", status=401)
                 raise ConnectionError("Authentication failed (HTTP 401)") from e
-            logger.error("Kimi bridge connection failed (HTTP %s)", status)
+            logger.error("kimi_bridge_connection_failed", status=status)
             if self.auto_reconnect and not self._closing:
                 await self._schedule_reconnect()
             else:
                 raise ConnectionError(f"Connection failed (HTTP {status})") from e
 
         except Exception as e:
-            logger.error("Kimi bridge connection error: %s", e)
+            logger.error("kimi_bridge_connection_error", error=str(e))
             if self.auto_reconnect and not self._closing:
                 await self._schedule_reconnect()
             else:
@@ -797,7 +797,7 @@ class KimiBridgeClient:
         self._streaming_updates.clear()
         self._streaming_events.clear()
 
-        logger.info("Disconnected from Kimi bridge")
+        logger.info("kimi_bridge_disconnected")
 
     async def wait_connected(self, timeout: float = 30.0) -> bool:
         """Wait until the connection is established.
@@ -829,11 +829,7 @@ class KimiBridgeClient:
         jitter = random.uniform(-RECONNECT_JITTER * delay, RECONNECT_JITTER * delay)
         actual_delay = max(0.1, delay + jitter)
 
-        logger.info(
-            "Reconnecting to Kimi bridge in %.1fs (attempt %d)",
-            actual_delay,
-            self._reconnect_count,
-        )
+        logger.info("kimi_bridge_reconnecting", delay_s=round(actual_delay, 1), attempt=self._reconnect_count)
         await asyncio.sleep(actual_delay)
 
         if not self._closing and not self._auth_failed:
@@ -846,12 +842,12 @@ class KimiBridgeClient:
         non-pong message arrives in that window, reconnect.
         """
         delay = random.uniform(RECONNECT_NOTIFY_MIN, RECONNECT_NOTIFY_MAX)
-        logger.info("Received reconnect notification, will reconnect in %.0fs if idle", delay)
+        logger.info("kimi_bridge_reconnect_notification", delay_s=round(delay))
 
         async def _reconnect_timer() -> None:
             await asyncio.sleep(delay)
             if self._connected and not self._closing:
-                logger.info("Reconnect timer expired, initiating reconnect")
+                logger.info("kimi_bridge_reconnect_timer_expired")
                 await self._do_reconnect()
 
         # Cancel any existing reconnect timer
@@ -893,7 +889,7 @@ class KimiBridgeClient:
                     try:
                         await self._ws.send(json.dumps({"type": "ping"}))
                     except Exception as e:
-                        logger.warning("Keepalive ping failed: %s", e)
+                        logger.warning("kimi_bridge_keepalive_failed", error=str(e))
                         break
         except asyncio.CancelledError:
             pass
@@ -913,7 +909,7 @@ class KimiBridgeClient:
                     break
                 elapsed = time.monotonic() - self._last_data_received
                 if elapsed >= LIVENESS_TIMEOUT_SECONDS:
-                    logger.warning("Liveness timeout: no data for %.0fs, reconnecting", elapsed)
+                    logger.warning("kimi_bridge_liveness_timeout", elapsed_s=round(elapsed))
                     await self._do_reconnect()
                     return
         except asyncio.CancelledError:
@@ -932,7 +928,7 @@ class KimiBridgeClient:
 
         raw = json.dumps(data, ensure_ascii=False)
         await self._ws.send(raw)
-        logger.debug("Sent: %s", raw[:500])
+        logger.debug("kimi_bridge_sent", payload=raw[:500])
 
     async def _send_rpc_request(
         self,
@@ -974,7 +970,7 @@ class KimiBridgeClient:
             return result
         except TimeoutError:
             self._pending_requests.pop(req_id, None)
-            logger.warning("Request timeout for %s (id=%s)", method, req_id)
+            logger.warning("kimi_bridge_request_timeout", method=method, req_id=req_id)
             raise
 
     # --- Client-Side Methods (we send to Kimi for K2 inference) ---
@@ -1428,11 +1424,11 @@ class KimiBridgeClient:
                     raw_msg = await self._ws.recv()
                 except websockets.exceptions.ConnectionClosed as e:
                     close_code = getattr(e, "code", 0)
-                    logger.info("Kimi bridge connection closed (code=%s)", close_code)
+                    logger.info("kimi_bridge_connection_closed", close_code=close_code)
 
                     if close_code == 4001:
                         self._auth_failed = True
-                        logger.error("Auth failed (WS close 4001) -- will not retry")
+                        logger.error("kimi_bridge_ws_auth_failed", close_code=4001)
                         self._connected = False
                         return
 
@@ -1463,7 +1459,7 @@ class KimiBridgeClient:
                     else:
                         data = json.loads(raw_msg)
                 except (json.JSONDecodeError, UnicodeDecodeError):
-                    logger.warning("Received non-JSON message: %s", str(raw_msg)[:200])
+                    logger.warning("kimi_bridge_non_json_message", preview=str(raw_msg)[:200])
                     continue
 
                 # JSON ping/pong
@@ -1487,7 +1483,7 @@ class KimiBridgeClient:
         except asyncio.CancelledError:
             pass
         except Exception:
-            logger.exception("Kimi bridge listener error")
+            logger.exception("kimi_bridge_listener_error")
             self._connected = False
             if self.auto_reconnect and not self._closing:
                 await self._schedule_reconnect()
@@ -1515,7 +1511,7 @@ class KimiBridgeClient:
             await self._handle_notification(data)
             return
 
-        logger.debug("Unroutable message: %s", json.dumps(data, ensure_ascii=False)[:200])
+        logger.debug("kimi_bridge_unroutable_message", preview=json.dumps(data, ensure_ascii=False)[:200])
 
     async def _handle_response(self, data: dict[str, Any]) -> None:
         """Handle a JSON-RPC response (resolve a pending request future).
@@ -1540,7 +1536,7 @@ class KimiBridgeClient:
             if not future.done():
                 future.set_result(data)
         else:
-            logger.debug("Response for unknown request: %s", req_id)
+            logger.debug("kimi_bridge_response_unknown_request", req_id=req_id)
 
     async def _handle_notification(self, data: dict[str, Any]) -> None:
         """Handle a JSON-RPC notification (no id)."""
@@ -1562,17 +1558,17 @@ class KimiBridgeClient:
 
             # Log for observability
             if update.update_type == SessionUpdateType.AGENT_MESSAGE_CHUNK:
-                logger.debug("K2 chunk: %s", update.text[:100] if update.text else "")
+                logger.debug("kimi_k2_chunk", text=update.text[:100] if update.text else "")
             elif update.update_type == SessionUpdateType.TOOL_CALL:
-                logger.debug("K2 tool call: %s", update.title)
+                logger.debug("kimi_k2_tool_call", title=update.title)
             elif update.update_type == SessionUpdateType.TOOL_CALL_UPDATE:
-                logger.debug("K2 tool result: %s", update.title)
+                logger.debug("kimi_k2_tool_result", title=update.title)
 
         elif method == "_kimi.com/reconnect":
             await self._handle_reconnect_notification()
 
         else:
-            logger.debug("Unhandled notification: %s", method)
+            logger.debug("kimi_bridge_unhandled_notification", method=method)
 
     async def _handle_incoming_request(self, data: dict[str, Any]) -> None:
         """Handle an incoming JSON-RPC request from Kimi (server mode).
@@ -1584,7 +1580,7 @@ class KimiBridgeClient:
         req_id: str | None = str(raw_id) if raw_id is not None else None
         params = data.get("params", {})
 
-        logger.info("Incoming ACP request: method=%s id=%s", method, req_id)
+        logger.info("kimi_bridge_incoming_request", method=method, req_id=req_id)
 
         if method == "initialize":
             if self._on_initialize and req_id is not None:
@@ -1613,7 +1609,7 @@ class KimiBridgeClient:
                 try:
                     await self._on_session_prompt(req_id, params, self)
                 except Exception:
-                    logger.exception("session/prompt handler error for id=%s", req_id)
+                    logger.exception("kimi_bridge_prompt_handler_error", req_id=req_id)
                     await self.send_error(
                         req_id,
                         AcpErrorCode.GATEWAY_ERROR,
@@ -1634,7 +1630,7 @@ class KimiBridgeClient:
                 await self.send_result(req_id, {})
 
         else:
-            logger.warning("Unknown incoming method: %s", method)
+            logger.warning("kimi_bridge_unknown_method", method=method)
             if req_id is not None:
                 await self.send_error(
                     req_id,
@@ -1672,7 +1668,7 @@ class KimiBridgeClient:
         user_text = extract_prompt_text(prompt)
         session_id = params.get("sessionId", "agent:main:main") if isinstance(params, dict) else "agent:main:main"
 
-        logger.info("Incoming user message (default echo handler): %s", user_text[:200])
+        logger.info("kimi_bridge_echo_handler", user_text=user_text[:200])
 
         # Echo user message
         await self.send_session_update(

@@ -8,7 +8,7 @@ Design doc: docs/specs/active/2026-03-09-sdk-integration-redesign.md
 
 from __future__ import annotations
 
-import logging
+import structlog
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
@@ -24,7 +24,7 @@ if TYPE_CHECKING:
     from corvus.gateway.sdk_client_manager import ManagedClient
     from corvus.gateway.session_emitter import SessionEmitter
 
-logger = logging.getLogger("corvus-gateway.stream")
+logger = structlog.get_logger(__name__)
 
 
 @dataclass

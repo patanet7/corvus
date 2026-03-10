@@ -129,7 +129,7 @@ class TestServerSourceContracts:
         remaining = self.chat_source[disconnect_pos:]
         assert "try:" in remaining
         assert "except Exception:" in remaining
-        assert "Session memory extraction failed" in remaining
+        assert "session_memory_extraction_failed" in remaining
 
     def test_response_parts_collected(self):
         """response_parts list is used to collect text blocks before appending to transcript."""

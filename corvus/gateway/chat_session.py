@@ -9,7 +9,8 @@ from __future__ import annotations
 
 import asyncio
 import json
-import logging
+import structlog
+import structlog.contextvars
 import uuid
 from collections.abc import Callable, Coroutine
 from dataclasses import dataclass
@@ -38,7 +39,7 @@ from corvus.gateway.session_emitter import (
 from corvus.gateway.task_planner import TaskRoute
 from corvus.session import SessionTranscript
 
-logger = logging.getLogger("corvus-gateway")
+logger = structlog.get_logger(__name__)
 
 
 # ---------------------------------------------------------------------------
@@ -356,9 +357,11 @@ class ChatSession:
             }
         )
 
+        structlog.contextvars.bind_contextvars(session_id=self.session_id, user=self.user)
+
         # --- Degraded mode check ---
         if not any_llm_configured():
-            logger.warning("No LLM backend configured; running in degraded mode")
+            logger.warning("no_llm_configured_degraded_mode")
             await self._degraded_message_loop()
             return
 
@@ -373,7 +376,7 @@ class ChatSession:
                 continue
 
             if msg.get("type") == "interrupt":
-                logger.info("User interrupted session %s", self.session_id)
+                logger.info("user_interrupted_session", session_id=self.session_id)
                 # Interrupt via SDK client manager
                 if self._current_turn is not None:
                     self._current_turn.dispatch_interrupted.set()
@@ -386,8 +389,9 @@ class ChatSession:
                                 )
                             except Exception:
                                 logger.warning(
-                                    "SDK interrupt failed for %s/%s",
-                                    self.session_id, client_info.agent_name,
+                                    "sdk_interrupt_failed",
+                                    session_id=self.session_id,
+                                    agent=client_info.agent_name,
                                     exc_info=True,
                                 )
                 await self.runtime.emitter.emit("session_interrupt", user=self.user, session_id=self.session_id)
@@ -400,7 +404,7 @@ class ChatSession:
             if msg.get("type") == "confirm_response":
                 call_id = msg.get("tool_call_id")
                 approved = msg.get("approved", False)
-                logger.info("Confirm response: call_id=%s approved=%s", call_id, approved)
+                logger.info("confirm_response", call_id=call_id, approved=approved)
                 await self.send(
                     {
                         "type": "confirm_response",
@@ -428,6 +432,7 @@ class ChatSession:
             turn_id = str(uuid.uuid4())
             dispatch_id = str(uuid.uuid4())
             self.current_turn_id = turn_id
+            structlog.contextvars.bind_contextvars(dispatch_id=dispatch_id, turn_id=turn_id)
 
             dispatch_resolution, dispatch_error = await resolve_chat_dispatch(
                 runtime=self.runtime,
@@ -459,3 +464,4 @@ class ChatSession:
                 user_model=user_model,
                 requires_tools=requires_tools,
             )
+            structlog.contextvars.unbind_contextvars("dispatch_id", "turn_id")

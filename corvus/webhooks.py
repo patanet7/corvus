@@ -6,13 +6,13 @@ via planner-driven background orchestration.
 
 import asyncio
 import hmac
-import logging
 import os
 from datetime import datetime
 
+import structlog
 from pydantic import BaseModel, Field, ValidationError  # noqa: F401
 
-logger = logging.getLogger("corvus-gateway")
+logger = structlog.get_logger(__name__)
 
 
 class TranscriptPayload(BaseModel):
@@ -100,7 +100,7 @@ def _emit_routing_decision(agent: str, webhook_type: str, query_preview: str) ->
             )
         )
     except Exception:
-        logger.debug("Failed to emit routing_decision event", exc_info=True)
+        logger.debug("routing_decision_emit_failed", exc_info=True)
 
 
 async def _dispatch_to_agent(
@@ -152,14 +152,14 @@ async def _dispatch_to_agent(
             message=str(exc),
         )
     except asyncio.CancelledError:
-        logger.warning("Webhook %s dispatch cancelled", webhook_type)
+        logger.warning("webhook_dispatch_cancelled", webhook_type=webhook_type)
         return WebhookResponse(
             status="error",
             webhook_type=webhook_type,
             message=error_message,
         )
     except Exception:
-        logger.exception("%s webhook processing failed", webhook_type.capitalize())
+        logger.exception("webhook_processing_failed", webhook_type=webhook_type)
         return WebhookResponse(
             status="error",
             webhook_type=webhook_type,

@@ -7,7 +7,7 @@ routes with bounded parallelism and consistent cancellation/error handling.
 from __future__ import annotations
 
 import asyncio
-import logging
+import structlog
 from typing import Any, Protocol
 
 from corvus.gateway.task_planner import TaskRoute
@@ -41,7 +41,7 @@ async def execute_dispatch_runs(
     run_requests: list[TaskRoute],
     max_parallel_agent_runs: int,
     execute_run: RunExecutor,
-    logger: logging.Logger,
+    logger: structlog.stdlib.BoundLogger,
     dispatch_interrupted: asyncio.Event | None = None,
 ) -> list[dict[str, Any]]:
     """Execute planned run routes with bounded fan-out.
@@ -79,7 +79,7 @@ async def execute_dispatch_runs(
                 except asyncio.CancelledError:
                     run_results.append(_interrupted_result())
                 except Exception:
-                    logger.exception("Unexpected failure in parallel run task")
+                    logger.exception("unexpected_failure_in_parallel_run_task")
                     run_results.append(_error_result())
     else:
         for route_index, route in enumerate(run_requests):
@@ -94,7 +94,7 @@ async def execute_dispatch_runs(
                     except asyncio.CancelledError:
                         run_results.append(_interrupted_result())
                     except Exception:
-                        logger.exception("Unexpected failure in run task")
+                        logger.exception("unexpected_failure_in_run_task")
                         run_results.append(_error_result())
                     break
                 if interrupt_event.is_set():

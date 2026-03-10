@@ -7,7 +7,6 @@ Manages LiteLLM proxy as a subprocess on 127.0.0.1:4000.
 from __future__ import annotations
 
 import asyncio
-import logging
 import os
 import signal
 import subprocess
@@ -16,9 +15,10 @@ from pathlib import Path
 from typing import Any
 
 import httpx
+import structlog
 import yaml
 
-logger = logging.getLogger("corvus-gateway.litellm")
+logger = structlog.get_logger(__name__)
 
 # SDK-native model names -> LiteLLM model identifiers
 _SDK_MODEL_MAP: dict[str, str] = {
@@ -201,7 +201,7 @@ class LiteLLMManager:
         self._config_path.write_text(
             yaml.dump(config, default_flow_style=False)
         )
-        logger.info("Generated LiteLLM config at %s", self._config_path)
+        logger.info("litellm_config_generated", path=str(self._config_path))
 
         self._process = subprocess.Popen(
             [
@@ -213,14 +213,11 @@ class LiteLLMManager:
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
         )
-        logger.info(
-            "LiteLLM proxy starting on %s:%d (pid=%d)",
-            self._host, self._port, self._process.pid,
-        )
+        logger.info("litellm_proxy_starting", host=self._host, port=self._port, pid=self._process.pid)
 
         await self._wait_healthy()
         os.environ["ANTHROPIC_BASE_URL"] = self.base_url
-        logger.info("ANTHROPIC_BASE_URL set to %s", self.base_url)
+        logger.info("anthropic_base_url_set", url=self.base_url)
 
     async def _wait_healthy(self) -> None:
         """Poll /health until LiteLLM is ready."""
@@ -229,7 +226,7 @@ class LiteLLMManager:
             try:
                 resp = httpx.get(f"{self.base_url}/health", timeout=2.0)
                 if resp.status_code == 200:
-                    logger.info("LiteLLM proxy is healthy")
+                    logger.info("litellm_proxy_healthy")
                     return
             except httpx.ConnectError:
                 pass
@@ -256,10 +253,10 @@ class LiteLLMManager:
         try:
             self._process.send_signal(signal.SIGTERM)
             self._process.wait(timeout=10)
-            logger.info("LiteLLM proxy stopped (pid=%d)", self._process.pid)
+            logger.info("litellm_proxy_stopped", pid=self._process.pid)
         except subprocess.TimeoutExpired:
             self._process.kill()
-            logger.warning("LiteLLM proxy killed (pid=%d)", self._process.pid)
+            logger.warning("litellm_proxy_killed", pid=self._process.pid)
         finally:
             self._process = None
 

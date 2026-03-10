@@ -15,8 +15,9 @@ a fixed rule set, and provides a dict-backed registry with full CRUD:
 All file I/O uses real filesystem operations (no mocks, no fakes).
 """
 
-import logging
 import re
+
+import structlog
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -24,7 +25,7 @@ import yaml
 
 from corvus.agents.spec import AgentSpec
 
-logger = logging.getLogger("corvus-gateway")
+logger = structlog.get_logger(__name__)
 
 VALID_COMPLEXITY = {"high", "medium", "low"}
 _SAFE_NAME_RE = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9_-]*$")
@@ -93,7 +94,7 @@ class AgentRegistry:
         self._specs.clear()
         self._file_contents.clear()
         if not self._config_dir.exists():
-            logger.warning("Config dir %s does not exist — no agents loaded", self._config_dir)
+            logger.warning("config_dir_missing", config_dir=str(self._config_dir))
             return
         for yaml_file in sorted(self._config_dir.glob("*.yaml")):
             self._load_one(yaml_file)
@@ -113,7 +114,7 @@ class AgentRegistry:
         try:
             spec = AgentSpec.from_yaml(path)
         except (yaml.YAMLError, ValueError, KeyError, TypeError) as exc:
-            logger.warning("Failed to parse %s: %s", path.name, exc)
+            logger.warning("agent_yaml_parse_failed", file=path.name, error=str(exc))
             return False
         if agent_dir is not None:
             soul_path = agent_dir / "soul.md"
@@ -124,7 +125,7 @@ class AgentRegistry:
                 spec.soul_file = str(soul_path.relative_to(self._config_dir.parent.parent))
         errors = self.validate(spec)
         if errors:
-            logger.warning("Invalid spec %s: %s", path.name, "; ".join(errors))
+            logger.warning("agent_spec_invalid", file=path.name, errors=errors)
             return False
         self._specs[spec.name] = spec
         self._file_contents[spec.name] = path.read_text()
@@ -267,13 +268,13 @@ class AgentRegistry:
             except Exception as exc:
                 stem = yaml_file.stem
                 result.errors[stem] = str(exc)
-                logger.warning("Reload: failed to parse %s: %s", yaml_file.name, exc)
+                logger.warning("reload_parse_failed", file=yaml_file.name, error=str(exc))
                 continue
             errors = self.validate(spec)
             if errors:
                 stem = yaml_file.stem
                 result.errors[stem] = "; ".join(errors)
-                logger.warning("Reload: invalid spec %s: %s", yaml_file.name, "; ".join(errors))
+                logger.warning("reload_spec_invalid", file=yaml_file.name, errors=errors)
                 continue
             disk_specs[spec.name] = spec
             disk_contents[spec.name] = yaml_file.read_text()
@@ -289,7 +290,7 @@ class AgentRegistry:
                 spec = AgentSpec.from_yaml(agent_yaml)
             except Exception as exc:
                 result.errors[subdir.name] = str(exc)
-                logger.warning("Reload: failed to parse %s/agent.yaml: %s", subdir.name, exc)
+                logger.warning("reload_parse_failed", file=f"{subdir.name}/agent.yaml", error=str(exc))
                 continue
             # Apply directory conventions for soul.md / prompt.md
             soul_path = subdir / "soul.md"
@@ -301,7 +302,7 @@ class AgentRegistry:
             errors = self.validate(spec)
             if errors:
                 result.errors[subdir.name] = "; ".join(errors)
-                logger.warning("Reload: invalid spec %s/agent.yaml: %s", subdir.name, "; ".join(errors))
+                logger.warning("reload_spec_invalid", file=f"{subdir.name}/agent.yaml", errors=errors)
                 continue
             disk_specs[spec.name] = spec
             disk_contents[spec.name] = agent_yaml.read_text()

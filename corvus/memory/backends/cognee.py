@@ -7,7 +7,6 @@ storage (FTS5 remains primary).
 
 from __future__ import annotations
 
-import logging
 import os
 from datetime import UTC, datetime
 from pathlib import Path
@@ -16,9 +15,10 @@ from uuid import NAMESPACE_URL, uuid5
 
 from corvus.memory.backends.protocol import HealthStatus
 from corvus.memory.record import MemoryRecord
+import structlog
 from corvus.ollama_probe import resolve_ollama_url
 
-logger = logging.getLogger("corvus.memory.backends.cognee")
+logger = structlog.get_logger(__name__)
 
 _RECORD_ID_PREFIX = "__corvus_record_id__:"
 _DEFAULT_OLLAMA_URLS = [
@@ -91,7 +91,7 @@ class CogneeBackend:
                 }
             )
         except AttributeError:
-            logger.debug("cognee.config API unavailable; continuing with env-only configuration")
+            logger.debug("cognee_config_api_unavailable")
 
         self._initialized = True
 

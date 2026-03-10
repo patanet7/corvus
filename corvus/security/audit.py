@@ -7,13 +7,14 @@ Each entry includes timestamp, agent, session, tool, outcome, and duration.
 from __future__ import annotations
 
 import json
-import logging
 import os
 from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 
-logger = logging.getLogger("corvus-audit")
+import structlog
+
+logger = structlog.get_logger(__name__)
 
 
 @dataclass

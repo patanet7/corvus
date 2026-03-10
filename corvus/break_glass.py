@@ -8,16 +8,16 @@ HMAC-SHA256 integrity protection on lockout state to prevent counter reset.
 import hashlib
 import hmac
 import json
-import logging
 import os
 import stat
 import time
 from pathlib import Path
 
+import structlog
 from argon2 import PasswordHasher
 from argon2.exceptions import VerifyMismatchError
 
-logger = logging.getLogger(__name__)
+logger = structlog.get_logger(__name__)
 
 DEFAULT_LOCKOUT_THRESHOLDS = [
     (3, 900),  # 3 failures -> 15 min
@@ -149,12 +149,12 @@ class BreakGlassManager:
             file_mode = stat.S_IMODE(file_stat.st_mode)
             if file_mode != 0o600:
                 logger.warning(
-                    "passphrase.hash has permissions %04o, expected 0600 — "
-                    "file may have been tampered with",
-                    file_mode,
+                    "passphrase_hash_permissions_wrong",
+                    file_mode=f"{file_mode:04o}",
+                    expected="0600",
                 )
         except OSError:
-            logger.warning("Unable to stat passphrase.hash for permission check")
+            logger.warning("passphrase_hash_stat_failed")
         return self._hash_file.read_text().strip()
 
     def _record_failure(self) -> None:
@@ -205,19 +205,14 @@ class BreakGlassManager:
                 data = envelope.get("data")
                 if data is None:
                     # Legacy format (no HMAC envelope) — treat as tampered
-                    logger.warning(
-                        "lockout.json missing HMAC envelope — resetting to locked state"
-                    )
+                    logger.warning("lockout_hmac_envelope_missing")
                     return locked_default
 
                 data_bytes = json.dumps(data, sort_keys=True).encode()
                 expected_hmac = self._compute_hmac(data_bytes)
 
                 if not hmac.compare_digest(stored_hmac, expected_hmac):
-                    logger.warning(
-                        "lockout.json HMAC mismatch — file may be tampered, "
-                        "resetting to locked state"
-                    )
+                    logger.warning("lockout_hmac_mismatch")
                     return locked_default
 
                 return {
@@ -225,9 +220,7 @@ class BreakGlassManager:
                     "locked_until": data.get("locked_until", 0.0),
                 }
             except (json.JSONDecodeError, OSError, TypeError) as exc:
-                logger.warning(
-                    "lockout.json unreadable (%s) — resetting to locked state", exc
-                )
+                logger.warning("lockout_file_unreadable", error=str(exc))
                 return locked_default
         return {"failures": 0, "locked_until": 0.0}
 

@@ -7,7 +7,7 @@ multi-agent dispatch flow as chat, while persisting dispatch/run/session events.
 from __future__ import annotations
 
 import asyncio
-import logging
+import structlog
 import uuid
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -20,7 +20,7 @@ from corvus.gateway.stream_processor import RunContext, StreamProcessor
 from corvus.gateway.task_planner import TaskRoute
 from corvus.gateway.workspace_runtime import cleanup_session_workspaces, prepare_agent_workspace
 
-logger = logging.getLogger("corvus-gateway")
+logger = structlog.get_logger(__name__)
 
 
 class DispatchValidationError(ValueError):
@@ -511,7 +511,7 @@ async def execute_planned_background_dispatch(
         try:
             cleanup_session_workspaces(session_id=session_id)
         except Exception:
-            logger.warning("Failed to cleanup workspaces for session %s", session_id)
+            logger.warning("workspace_cleanup_failed", session_id=session_id)
 
         await runtime.emitter.emit(
             "dispatch_completed",
@@ -533,11 +533,11 @@ async def execute_planned_background_dispatch(
         )
 
         logger.info(
-            "Background dispatch completed (source=%s, webhook_type=%s, routes=%d, status=%s)",
-            source,
-            webhook_type,
-            len(run_requests),
-            dispatch_status,
+            "background_dispatch_completed",
+            source=source,
+            webhook_type=webhook_type,
+            routes=len(run_requests),
+            status=dispatch_status,
         )
 
         return DispatchExecutionSummary(
@@ -550,5 +550,5 @@ async def execute_planned_background_dispatch(
             cost_usd=total_cost,
         )
     except asyncio.CancelledError:
-        logger.warning("Background dispatch cancelled (source=%s, webhook_type=%s)", source, webhook_type)
+        logger.warning("background_dispatch_cancelled", source=source, webhook_type=webhook_type)
         raise

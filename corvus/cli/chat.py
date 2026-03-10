@@ -19,14 +19,17 @@ from __future__ import annotations
 
 import argparse
 import json
-import logging
 import os
 import shutil
 import subprocess
 import sys
 from pathlib import Path
 
-logger = logging.getLogger("corvus-cli")
+import structlog
+
+from corvus.logging import configure_logging
+
+logger = structlog.get_logger(__name__)
 
 # ---------------------------------------------------------------------------
 # Subprocess environment allowlist (F-001)
@@ -339,7 +342,7 @@ def _build_agent_mcp_config(
             memory_domain=memory_domain,
         )
     except Exception as exc:
-        logger.warning("MCP config generation failed: %s — tools unavailable in CLI", exc)
+        logger.warning("mcp_config_generation_failed", error=str(exc))
         return None
 
 
@@ -464,11 +467,11 @@ def _start_litellm(runtime: object) -> None:
         )
         runtime.model_router.discover_models()  # type: ignore[attr-defined]
         logger.info(
-            "LiteLLM proxy started, ANTHROPIC_BASE_URL=%s",
-            os.environ.get("ANTHROPIC_BASE_URL"),
+            "litellm_proxy_started",
+            anthropic_base_url=os.environ.get("ANTHROPIC_BASE_URL"),
         )
     except Exception as exc:
-        logger.warning("LiteLLM proxy failed to start: %s — using direct API", exc)
+        logger.warning("litellm_proxy_failed", error=str(exc), fallback="direct_api")
         print(
             f"  Warning: LiteLLM proxy not available ({exc}). Using direct API.",
             file=sys.stderr,
@@ -489,7 +492,7 @@ def main() -> None:
     """Entry point for corvus chat."""
     from corvus.gateway.runtime import build_runtime, ensure_dirs
 
-    logging.basicConfig(level=logging.WARNING, format="%(message)s")
+    configure_logging()
     args = parse_args()
 
     ensure_dirs()

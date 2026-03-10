@@ -2,13 +2,13 @@
 
 from __future__ import annotations
 
-import logging
+import structlog
 from dataclasses import dataclass, field
 from pathlib import Path
 
 import yaml
 
-logger = logging.getLogger("corvus.memory.config")
+logger = structlog.get_logger(__name__)
 
 _DEFAULT_PRIMARY_DB = Path(".data/memory/main.sqlite")
 
@@ -45,7 +45,7 @@ class MemoryConfig:
         """Load memory config from YAML with safe fallback behavior."""
         fallback_db = Path(default_db_path) if default_db_path else _DEFAULT_PRIMARY_DB
         if not path.exists():
-            logger.info("Memory config not found at %s; using defaults", path)
+            logger.info("memory_config_not_found", path=str(path))
             return cls(primary_db_path=fallback_db)
 
         try:
@@ -62,7 +62,7 @@ class MemoryConfig:
             mmr_lambda = _as_float(raw.get("mmr_lambda", 0.7), "mmr_lambda")
             audit_enabled = _as_bool(raw.get("audit_enabled", True), "audit_enabled")
 
-            logger.info("Loaded memory config from %s", path)
+            logger.info("memory_config_loaded", path=str(path))
             return cls(
                 primary_db_path=primary_db_path,
                 overlays=overlays,
@@ -74,7 +74,7 @@ class MemoryConfig:
         except Exception:
             if strict:
                 raise
-            logger.exception("Failed to load memory config from %s; using defaults", path)
+            logger.exception("memory_config_load_failed", path=str(path))
             return cls(primary_db_path=fallback_db)
 
     def enabled_overlays(self) -> list[BackendConfig]:

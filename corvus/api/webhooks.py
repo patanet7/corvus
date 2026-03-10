@@ -6,8 +6,7 @@ server.py stays focused on runtime composition.
 
 from __future__ import annotations
 
-import logging
-
+import structlog
 from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
 from pydantic import ValidationError
@@ -24,7 +23,7 @@ from corvus.webhooks import (
     verify_webhook_secret,
 )
 
-logger = logging.getLogger("corvus-gateway")
+logger = structlog.get_logger(__name__)
 
 router = APIRouter(prefix="/api/webhooks", tags=["webhooks"])
 
@@ -47,7 +46,7 @@ async def webhook(webhook_type: str, request: Request):
         )
 
     body = await request.json()
-    logger.info("Webhook received: type=%s", webhook_type)
+    logger.info("webhook_received", webhook_type=webhook_type)
 
     if webhook_type not in WEBHOOK_DISPATCH:
         return JSONResponse(

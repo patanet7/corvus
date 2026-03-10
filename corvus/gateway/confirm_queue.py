@@ -7,9 +7,9 @@ this queue, unblocking the waiting coroutine.
 """
 
 import asyncio
-import logging
+import structlog
 
-logger = logging.getLogger("corvus-gateway")
+logger = structlog.get_logger(__name__)
 
 
 class ConfirmQueue:
@@ -29,14 +29,14 @@ class ConfirmQueue:
         Returns True if approved, False if denied or timed out.
         """
         if call_id in self._pending:
-            logger.warning("Duplicate confirm request for call_id=%s", call_id)
+            logger.warning("duplicate_confirm_request", call_id=call_id)
         loop = asyncio.get_running_loop()
         future: asyncio.Future[bool] = loop.create_future()
         self._pending[call_id] = future
         try:
             return await asyncio.wait_for(future, timeout=timeout_s)
         except asyncio.TimeoutError:
-            logger.warning("Confirm gate timed out for call_id=%s", call_id)
+            logger.warning("confirm_gate_timed_out", call_id=call_id)
             return False
         finally:
             self._pending.pop(call_id, None)
@@ -45,10 +45,10 @@ class ConfirmQueue:
         """Deliver user's confirm/deny response to the waiting coroutine."""
         future = self._pending.get(call_id)
         if future is None:
-            logger.warning("Confirm response for unknown call_id=%s (expired?)", call_id)
+            logger.warning("confirm_response_unknown", call_id=call_id)
             return
         if future.done():
-            logger.warning("Confirm response for already-resolved call_id=%s", call_id)
+            logger.warning("confirm_response_already_resolved", call_id=call_id)
             return
         future.set_result(approved)
 
@@ -57,5 +57,5 @@ class ConfirmQueue:
         for call_id, future in self._pending.items():
             if not future.done():
                 future.set_result(False)
-                logger.info("Cancelled pending confirm for call_id=%s", call_id)
+                logger.info("cancelled_pending_confirm", call_id=call_id)
         self._pending.clear()

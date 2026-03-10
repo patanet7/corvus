@@ -6,13 +6,13 @@ are persisted to both the Obsidian vault and SQLite FTS5 index via MemoryEngine.
 """
 
 import json
-import logging
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Literal
 from uuid import uuid4
 
+import structlog
 from anthropic import AsyncAnthropic
 
 from corvus.memory.hub import MemoryHub
@@ -22,7 +22,7 @@ from corvus.memory.record import MemoryRecord
 # Signature: (system_prompt: str, user_message: str) -> raw_text_response
 LLMExtractor = Callable[[str, str], Awaitable[str]]
 
-logger = logging.getLogger("corvus-gateway")
+logger = structlog.get_logger(__name__)
 
 EXTRACTION_MODEL = "claude-haiku-4-5-20251001"
 
@@ -173,11 +173,11 @@ def parse_extraction_response(raw: str) -> list[ExtractedMemory]:
     try:
         data = json.loads(stripped)
     except (json.JSONDecodeError, TypeError):
-        logger.warning("Failed to parse extraction response as JSON")
+        logger.warning("extraction_response_parse_failed")
         return []
 
     if not isinstance(data, dict) or "memories" not in data:
-        logger.warning("Extraction response missing 'memories' key")
+        logger.warning("extraction_response_missing_memories_key")
         return []
 
     memories = []
@@ -213,7 +213,7 @@ def parse_extraction_response(raw: str) -> list[ExtractedMemory]:
                 )
             )
         except (KeyError, ValueError, TypeError) as e:
-            logger.warning("Skipping malformed memory item: %s", e)
+            logger.warning("extraction_memory_item_malformed", error=str(e))
             continue
 
     return memories[:5]  # Enforce max 5 memories
@@ -296,16 +296,16 @@ async def extract_session_memories(
                 await hub.save(record, agent_name=agent_name)
                 saved.append(mem)
             except Exception:
-                logger.exception("Failed to save extracted memory: %s", mem.content[:50])
+                logger.exception("extraction_memory_save_failed", content_preview=mem.content[:50])
 
         logger.info(
-            "Session extraction: %d memories extracted, %d saved for user=%s",
-            len(memories),
-            len(saved),
-            transcript.user,
+            "session_extraction_complete",
+            extracted=len(memories),
+            saved=len(saved),
+            user=transcript.user,
         )
         return saved
 
     except Exception:
-        logger.exception("Session memory extraction failed")
+        logger.exception("session_memory_extraction_failed")
         return []

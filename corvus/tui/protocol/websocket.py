@@ -16,7 +16,6 @@ Protocol:
 
 import asyncio
 import json
-import logging
 from collections.abc import Callable, Coroutine
 from datetime import datetime
 from typing import Any
@@ -26,9 +25,10 @@ import websockets
 import websockets.asyncio.client
 
 from corvus.tui.protocol.base import GatewayProtocol, SessionDetail, SessionSummary
+import structlog
 from corvus.tui.protocol.events import ProtocolEvent, parse_event
 
-logger = logging.getLogger("corvus.tui.websocket")
+logger = structlog.get_logger(__name__)
 
 
 class WebSocketGateway(GatewayProtocol):
@@ -113,7 +113,7 @@ class WebSocketGateway(GatewayProtocol):
                 resp.raise_for_status()
                 return resp.json()
         except (httpx.HTTPError, httpx.InvalidURL, ValueError) as exc:
-            logger.warning("REST GET %s failed: %s", url, exc)
+            logger.warning("rest_get_failed", url=url, error=str(exc))
             return None
 
     async def _rest_post(self, path: str, body: dict[str, Any]) -> Any:
@@ -128,7 +128,7 @@ class WebSocketGateway(GatewayProtocol):
                 resp.raise_for_status()
                 return resp.json()
         except (httpx.HTTPError, httpx.InvalidURL, ValueError) as exc:
-            logger.warning("REST POST %s failed: %s", url, exc)
+            logger.warning("rest_post_failed", url=url, error=str(exc))
             return None
 
     async def _rest_delete(self, path: str, params: dict[str, Any] | None = None) -> Any:
@@ -143,7 +143,7 @@ class WebSocketGateway(GatewayProtocol):
                 resp.raise_for_status()
                 return resp.json()
         except (httpx.HTTPError, httpx.InvalidURL, ValueError) as exc:
-            logger.warning("REST DELETE %s failed: %s", url, exc)
+            logger.warning("rest_delete_failed", url=url, error=str(exc))
             return None
 
     # -- Connection lifecycle --
@@ -195,7 +195,7 @@ class WebSocketGateway(GatewayProtocol):
                 try:
                     data = json.loads(raw_message)
                 except json.JSONDecodeError:
-                    logger.warning("Received non-JSON message from server")
+                    logger.warning("ws_non_json_message")
                     continue
 
                 msg_type = data.get("type", "")
@@ -210,7 +210,7 @@ class WebSocketGateway(GatewayProtocol):
                     await self._event_callback(event)
 
         except websockets.exceptions.ConnectionClosed:
-            logger.info("WebSocket connection closed")
+            logger.info("ws_connection_closed")
             self._connected = False
         except asyncio.CancelledError:
             pass

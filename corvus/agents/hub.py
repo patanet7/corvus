@@ -4,7 +4,7 @@ Wires AgentSpec -> tools -> memory -> SDK AgentDefinition.
 Replaces the monolithic build_options() in server.py.
 """
 
-import logging
+import structlog
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Literal, cast
@@ -20,7 +20,7 @@ from corvus.memory import MemoryHub, create_memory_toolkit
 from corvus.memory.toolkit import MemoryTool
 from corvus.model_router import ModelRouter
 
-logger = logging.getLogger("corvus-gateway")
+logger = structlog.get_logger(__name__)
 
 # Valid model names accepted by AgentDefinition.model in the SDK.
 SdkModelName = Literal["sonnet", "opus", "haiku", "inherit"]
@@ -134,7 +134,7 @@ class AgentsHub:
         """
         spec = self.registry.get(agent_name)
         if spec is None:
-            logger.warning("Unknown agent '%s' requested memory access — using safe defaults", agent_name)
+            logger.warning("unknown_agent_memory_access", agent_name=agent_name, detail="using safe defaults")
             mem = self._DEFAULT_MEMORY_ACCESS
         else:
             mem = spec.memory if spec.memory is not None else self._DEFAULT_MEMORY_ACCESS
@@ -233,14 +233,10 @@ class AgentsHub:
             try:
                 result.agents[spec.name] = self.build_agent(spec.name)
             except Exception as exc:
-                logger.error("Failed to build agent %s: %s", spec.name, exc)
+                logger.error("agent_build_failed", agent=spec.name, error=str(exc))
                 result.errors[spec.name] = str(exc)
         if result.errors:
-            logger.error(
-                "build_all completed with %d errors: %s",
-                len(result.errors),
-                list(result.errors.keys()),
-            )
+            logger.error("build_all_partial_failure", error_count=len(result.errors), failed_agents=list(result.errors.keys()))
         return result
 
     def build_mcp_servers(self, name: str) -> dict:
@@ -343,7 +339,7 @@ class AgentsHub:
                     )
                 )
             else:
-                logger.warning("Soul file missing for agent %s: %s", agent_name, spec.soul_file)
+                logger.warning("soul_file_missing", agent=agent_name, soul_file=spec.soul_file)
 
         # 2. Agent identity — dynamic, per-agent
         layers.append(
@@ -370,7 +366,7 @@ class AgentsHub:
                     )
                 )
             except FileNotFoundError:
-                logger.warning("Prompt file missing for agent %s", agent_name)
+                logger.warning("prompt_file_missing", agent=agent_name)
 
         # 3. Sibling agents (composed dynamically from registry)
         enabled = self.registry.list_enabled()

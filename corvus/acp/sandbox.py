@@ -10,13 +10,14 @@ Process sandbox (build_sandbox_command) wraps the spawn command in platform-spec
 network isolation (sandbox-exec on macOS, unshare on Linux).
 """
 
-import logging
 import os
 import re
 import sys
 from pathlib import Path
 
-logger = logging.getLogger(__name__)
+import structlog
+
+logger = structlog.get_logger(__name__)
 
 # Env keys that are ALWAYS stripped from the spawn env (Corvus secrets, cloud creds).
 _STRIPPED_KEY_PATTERNS: tuple[re.Pattern[str], ...] = (
@@ -214,8 +215,5 @@ def build_sandbox_command(
     if plat == "linux":
         return ["unshare", "--net", "--map-root-user", *cmd]
 
-    logger.warning(
-        "No sandbox available for platform %r; running command unsandboxed",
-        plat,
-    )
+    logger.warning("no_sandbox_available", platform=plat)
     return cmd

@@ -16,11 +16,12 @@ Typical usage::
 from __future__ import annotations
 
 import json
-import logging
 import os
 import subprocess
 import time
 from pathlib import Path
+
+import structlog
 
 from corvus.auth.openai_oauth import refresh_access_token
 from corvus.auth.profile_resolver import resolve_profile
@@ -31,7 +32,7 @@ from corvus.auth.profiles import (
     TokenCredential,
 )
 
-logger = logging.getLogger(__name__)
+logger = structlog.get_logger(__name__)
 
 # ---------------------------------------------------------------------------
 # Service environment variable map — single source of truth for the mapping
@@ -283,7 +284,7 @@ class CredentialStore:
                     if self._path is not None:
                         self._save()
                 except Exception as exc:
-                    logger.warning("Failed to refresh Codex OAuth token: %s", exc)
+                    logger.warning("codex_oauth_refresh_failed", error=str(exc))
 
         if "openai_compat" in self._data:
             compat = self._data["openai_compat"]

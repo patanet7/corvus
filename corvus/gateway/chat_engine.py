@@ -6,13 +6,13 @@ chat transport can stay focused on protocol concerns.
 
 from __future__ import annotations
 
-import logging
+import structlog
 from dataclasses import dataclass
 
 from corvus.gateway.runtime import GatewayRuntime
 from corvus.gateway.task_planner import DispatchPlan, TaskRoute
 
-logger = logging.getLogger("corvus-gateway.chat-engine")
+logger = structlog.get_logger(__name__)
 
 _VALID_DISPATCH_MODES = {"router", "direct", "parallel"}
 
@@ -87,9 +87,9 @@ async def resolve_chat_dispatch(
             classified = await runtime.router_agent.classify(user_message)
         except Exception as exc:
             logger.error(
-                "Router agent classification failed: %s: %s",
-                type(exc).__name__,
-                exc,
+                "router_classification_failed",
+                error_type=type(exc).__name__,
+                error=str(exc),
                 exc_info=True,
             )
             return None, ChatDispatchError(

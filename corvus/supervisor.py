@@ -13,14 +13,15 @@ Usage:
 from __future__ import annotations
 
 import asyncio
-import logging
 import time
 from typing import Any
+
+import structlog
 
 from corvus.capabilities.registry import CapabilitiesRegistry, ModuleHealth
 from corvus.events import EventEmitter
 
-logger = logging.getLogger("corvus-gateway.supervisor")
+logger = structlog.get_logger(__name__)
 
 HEARTBEAT_INTERVAL = 30  # seconds
 MAX_RESTART_ATTEMPTS = 3
@@ -52,7 +53,7 @@ class AgentSupervisor:
         """Start the heartbeat background loop."""
         self._started_at = time.monotonic()
         self._task = asyncio.create_task(self._loop())
-        logger.info("AgentSupervisor started (interval=%ds)", self.heartbeat_interval)
+        logger.info("supervisor_started", interval_s=self.heartbeat_interval)
 
     async def _loop(self) -> None:
         """Internal heartbeat loop — runs until cancelled."""
@@ -60,7 +61,7 @@ class AgentSupervisor:
             try:
                 await self.heartbeat()
             except Exception:
-                logger.exception("Heartbeat cycle failed")
+                logger.exception("supervisor_heartbeat_failed")
             await asyncio.sleep(self.heartbeat_interval)
 
     async def heartbeat(self) -> dict[str, Any]:
@@ -111,7 +112,7 @@ class AgentSupervisor:
         self._restart_counts.pop(name, None)
         await entry.restart()
         await self.emitter.emit("provider_restart", provider=name, source="manual")
-        logger.info("Manually restarted module: %s", name)
+        logger.info("supervisor_module_restarted", module=name, source="manual")
 
     async def _try_restart(self, name: str, mcp_status: dict[str, dict[str, Any]]) -> None:
         """Attempt to restart an unhealthy module, respecting the retry cap."""
@@ -132,9 +133,9 @@ class AgentSupervisor:
                 provider=name,
                 attempt=count + 1,
             )
-            logger.info("Restarted module %s (attempt %d)", name, count + 1)
+            logger.info("supervisor_module_restarted", module=name, attempt=count + 1)
         except Exception:
-            logger.exception("Failed to restart module %s (attempt %d)", name, count + 1)
+            logger.exception("supervisor_module_restart_failed", module=name, attempt=count + 1)
 
     async def graceful_shutdown(self) -> None:
         """Cancel the heartbeat loop and wait for it to finish."""
@@ -144,4 +145,4 @@ class AgentSupervisor:
                 await self._task
             except asyncio.CancelledError:
                 pass
-        logger.info("AgentSupervisor stopped")
+        logger.info("supervisor_stopped")

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-import logging
+import structlog
 import os
 import re
 import shutil
@@ -25,7 +25,7 @@ from corvus.gateway.runtime import GatewayRuntime
 from corvus.hooks import create_hooks
 from corvus.permissions import evaluate_tool_permission, expand_confirm_gated_tools, normalize_permission_mode
 
-logger = logging.getLogger("corvus-gateway")
+logger = structlog.get_logger(__name__)
 
 
 _CLAUDE_HOME_SCOPE_ALIASES = {
@@ -53,7 +53,7 @@ def _normalize_claude_home_scope(scope: str) -> str:
     normalized = _CLAUDE_HOME_SCOPE_ALIASES.get(scope.strip().lower())
     if normalized:
         return normalized
-    logger.warning("Unknown CLAUDE home scope '%s'; falling back to deployment", scope)
+    logger.warning("unknown_claude_home_scope", scope=scope)
     return "deployment"
 
 
@@ -174,8 +174,8 @@ def build_hooks(
                 await websocket.send_json(msg)
             except Exception:
                 logger.warning(
-                    "ws_forward: connection closed, cannot send %s",
-                    msg.get("type", "unknown"),
+                    "ws_forward_connection_closed",
+                    msg_type=msg.get("type", "unknown"),
                 )
 
     event_hooks = create_hooks(
@@ -209,8 +209,8 @@ def build_options(
     build_result = runtime.agents_hub.build_all()
     if build_result.errors:
         logger.error(
-            "Hub build completed with errors: %s; running in degraded mode",
-            build_result.errors,
+            "hub_build_errors_degraded_mode",
+            errors=build_result.errors,
         )
 
     agents = build_result.agents
@@ -220,7 +220,7 @@ def build_options(
         if selected is not None:
             selected_agents = {agent_name: selected}
         else:
-            logger.warning("Requested agent '%s' missing from build result; using full agent set", agent_name)
+            logger.warning("requested_agent_missing", agent_name=agent_name)
 
     if agent_name:
         spec = runtime.agents_hub.get_agent(agent_name)

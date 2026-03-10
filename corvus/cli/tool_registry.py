@@ -14,11 +14,14 @@ from __future__ import annotations
 
 import argparse
 import json
-import logging
 import os
 from collections.abc import Callable
 
-logger = logging.getLogger("corvus-mcp-bridge")
+import structlog
+
+from corvus.logging import configure_logging
+
+logger = structlog.get_logger(__name__)
 
 # Module name -> (configure_fn, create_tools_fn) mapping.
 # Populated lazily via _populate_module_registry().
@@ -248,7 +251,7 @@ def register_module_tools(
     for module_name, module_cfg in module_configs.items():
         entry = _MODULE_REGISTRY.get(module_name)
         if entry is None:
-            logger.warning("Unknown module '%s' — skipping", module_name)
+            logger.warning("unknown_module", module=module_name)
             continue
 
         configure_fn, create_tools_fn = entry
@@ -256,7 +259,7 @@ def register_module_tools(
             configure_fn(module_cfg)
         except Exception as exc:
             if skip_configure_errors:
-                logger.warning("Module '%s' configure failed: %s — skipping", module_name, exc)
+                logger.warning("module_configure_failed", module=module_name, error=str(exc))
                 continue
             raise
 
@@ -333,7 +336,7 @@ def main() -> None:
     """Entry point for the MCP bridge server."""
     from mcp.server.fastmcp import FastMCP
 
-    logging.basicConfig(level=logging.WARNING, format="%(message)s")
+    configure_logging()
     args = parse_args()
     module_configs: dict[str, dict] = json.loads(args.modules_json)
 
@@ -345,7 +348,7 @@ def main() -> None:
         module_configs=module_configs,
         skip_configure_errors=True,
     )
-    logger.info("Registered %d module tools for %s", len(registered), args.agent)
+    logger.info("module_tools_registered", count=len(registered), agent=args.agent)
 
     # Register memory tools
     try:
@@ -354,9 +357,9 @@ def main() -> None:
             agent_name=args.agent,
             memory_domain=args.memory_domain,
         )
-        logger.info("Registered %d memory tools", len(mem_registered))
+        logger.info("memory_tools_registered", count=len(mem_registered))
     except Exception as exc:
-        logger.warning("Memory toolkit init failed: %s — memory tools unavailable", exc)
+        logger.warning("memory_toolkit_init_failed", error=str(exc))
 
     mcp.run()
 

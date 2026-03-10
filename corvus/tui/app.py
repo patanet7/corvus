@@ -3,10 +3,10 @@
 import argparse
 import asyncio
 import html
-import logging
 import os
 from pathlib import Path
 
+import structlog
 from dotenv import load_dotenv
 from prompt_toolkit import PromptSession
 from prompt_toolkit.formatted_text import HTML
@@ -38,9 +38,10 @@ from corvus.tui.output.status_bar import StatusBar
 from corvus.tui.output.token_counter import TokenCounter
 from corvus.tui.protocol.in_process import InProcessGateway
 from corvus.tui.protocol.websocket import WebSocketGateway
+from corvus.logging import configure_logging
 from corvus.tui.theme import TuiTheme, available_themes
 
-logger = logging.getLogger("corvus-tui.app")
+logger = structlog.get_logger(__name__)
 
 
 class TuiApp:
@@ -559,11 +560,7 @@ def main() -> None:
     args = parser.parse_args()
 
     os.makedirs("logs", exist_ok=True)
-    logging.basicConfig(
-        filename="logs/tui.log",
-        level=logging.INFO,
-        format="%(asctime)s %(name)s %(levelname)s %(message)s",
-    )
+    configure_logging(log_file="logs/tui.log")
 
     app = TuiApp()
 

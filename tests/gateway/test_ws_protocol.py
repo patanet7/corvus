@@ -711,7 +711,7 @@ class TestWSServerSourceContracts:
     def test_ws_forward_logs_on_failure(self):
         """ws_forward logs debug message instead of bare pass."""
         source = self._load_options_source()
-        assert "ws_forward: connection closed" in source
+        assert "ws_forward_connection_closed" in source
 
     def test_phase2_interrupt_todo_noted(self):
         """chat router keeps TODO for async queue interrupt improvement."""

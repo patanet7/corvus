@@ -2,13 +2,13 @@
 
 from __future__ import annotations
 
-import logging
+import structlog
 from dataclasses import dataclass, field
 from pathlib import Path
 
 import yaml
 
-logger = logging.getLogger("corvus.capabilities.config")
+logger = structlog.get_logger(__name__)
 
 
 @dataclass(frozen=True)
@@ -39,7 +39,7 @@ class CapabilitiesConfig:
         - parse/shape error -> default config
         """
         if not path.exists():
-            logger.info("Capabilities config not found at %s; using defaults", path)
+            logger.info("capabilities_config_not_found", path=str(path))
             return cls()
 
         try:
@@ -68,14 +68,14 @@ class CapabilitiesConfig:
                 known = set(available_modules)
                 unknown = sorted(set(modules) - known)
                 for module_name in unknown:
-                    logger.warning("Capabilities config references unknown module '%s'; ignoring", module_name)
+                    logger.warning("unknown_capability_module", module=module_name)
 
-            logger.info("Loaded capabilities config from %s", path)
+            logger.info("capabilities_config_loaded", path=str(path))
             return cls(modules=modules)
         except Exception:
             if strict:
                 raise
-            logger.exception("Failed to load capabilities config from %s; using defaults", path)
+            logger.exception("capabilities_config_load_failed", path=str(path))
             return cls()
 
     def enabled_modules(self, available_modules: list[str]) -> list[str]:

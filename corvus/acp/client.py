@@ -16,7 +16,6 @@ Security layers enforced:
 
 import asyncio
 import json
-import logging
 import signal
 from collections.abc import AsyncIterator
 from dataclasses import dataclass
@@ -28,9 +27,10 @@ from corvus.acp.permission_map import map_acp_permission
 from corvus.acp.registry import AcpAgentEntry
 from corvus.acp.sandbox import build_acp_spawn_env, build_sandbox_command
 from corvus.acp.terminal_gate import check_terminal_command
+import structlog
 from corvus.sanitize import sanitize
 
-logger = logging.getLogger(__name__)
+logger = structlog.get_logger(__name__)
 
 ACP_PROTOCOL_VERSION = 1
 CLIENT_NAME = "corvus-gateway"
@@ -132,10 +132,10 @@ class CorvusACPClient:
         sandboxed_cmd = build_sandbox_command(cmd_parts, workspace=self._config.workspace)
 
         logger.info(
-            "Spawning ACP agent %r: %s (workspace=%s)",
-            self.agent_name,
-            sandboxed_cmd,
-            self._config.workspace,
+            "acp_agent_spawning",
+            agent_name=self.agent_name,
+            command=sandboxed_cmd,
+            workspace=str(self._config.workspace),
         )
 
         self._process = await asyncio.create_subprocess_exec(
@@ -148,7 +148,7 @@ class CorvusACPClient:
         )
 
         pid = self._process.pid
-        logger.info("ACP agent %r spawned with PID %d", self.agent_name, pid)
+        logger.info("acp_agent_spawned", agent_name=self.agent_name, pid=pid)
         return pid
 
     async def initialize(self) -> dict[str, Any]:
@@ -232,9 +232,9 @@ class CorvusACPClient:
                 msg = json.loads(text)
             except json.JSONDecodeError:
                 logger.warning(
-                    "ACP agent %r sent non-JSON line: %r",
-                    self.agent_name,
-                    text[:200],
+                    "acp_agent_non_json_line",
+                    agent_name=self.agent_name,
+                    line=text[:200],
                 )
                 continue
 
@@ -291,10 +291,10 @@ class CorvusACPClient:
 
         if not result.allowed:
             logger.warning(
-                "ACP %r fs read denied for %r: %s",
-                self.agent_name,
-                path,
-                result.reason,
+                "acp_fs_read_denied",
+                agent_name=self.agent_name,
+                path=path,
+                reason=result.reason,
             )
             return {"error": result.reason}
 
@@ -328,10 +328,10 @@ class CorvusACPClient:
 
         if not result.allowed:
             logger.warning(
-                "ACP %r fs write denied for %r: %s",
-                self.agent_name,
-                path,
-                result.reason,
+                "acp_fs_write_denied",
+                agent_name=self.agent_name,
+                path=path,
+                reason=result.reason,
             )
             return {"error": result.reason}
 
@@ -361,10 +361,10 @@ class CorvusACPClient:
 
         if not result.allowed:
             logger.warning(
-                "ACP %r terminal command denied: %r — %s",
-                self.agent_name,
-                command,
-                result.reason,
+                "acp_terminal_command_denied",
+                agent_name=self.agent_name,
+                command=command,
+                reason=result.reason,
             )
             return {"error": result.reason}
 
@@ -395,9 +395,9 @@ class CorvusACPClient:
         # __DENIED__ means unknown kind — deny by default
         if mapped == "__DENIED__":
             logger.warning(
-                "ACP %r permission denied for unknown kind %r",
-                self.agent_name,
-                kind,
+                "acp_permission_denied_unknown_kind",
+                agent_name=self.agent_name,
+                kind=kind,
             )
             return False
 
@@ -413,10 +413,10 @@ class CorvusACPClient:
         allowed = policy_map.get(mapped, False)
         if not allowed:
             logger.warning(
-                "ACP %r permission denied: kind=%r mapped=%r",
-                self.agent_name,
-                kind,
-                mapped,
+                "acp_permission_denied",
+                agent_name=self.agent_name,
+                kind=kind,
+                mapped=mapped,
             )
         return allowed
 
@@ -433,7 +433,7 @@ class CorvusACPClient:
             return
 
         pid = self._process.pid
-        logger.info("Terminating ACP agent %r (PID %d)", self.agent_name, pid)
+        logger.info("acp_agent_terminating", agent_name=self.agent_name, pid=pid)
 
         # Close stdin to signal EOF
         if self._process.stdin is not None:
@@ -446,13 +446,13 @@ class CorvusACPClient:
         # Wait for graceful exit
         try:
             await asyncio.wait_for(self._process.wait(), timeout=timeout)
-            logger.info("ACP agent %r exited gracefully", self.agent_name)
+            logger.info("acp_agent_exited_gracefully", agent_name=self.agent_name)
             return
         except TimeoutError:
             pass
 
         # SIGTERM
-        logger.warning("ACP agent %r did not exit; sending SIGTERM", self.agent_name)
+        logger.warning("acp_agent_sigterm", agent_name=self.agent_name)
         try:
             self._process.send_signal(signal.SIGTERM)
         except ProcessLookupError:
@@ -460,20 +460,20 @@ class CorvusACPClient:
 
         try:
             await asyncio.wait_for(self._process.wait(), timeout=timeout)
-            logger.info("ACP agent %r exited after SIGTERM", self.agent_name)
+            logger.info("acp_agent_exited_after_sigterm", agent_name=self.agent_name)
             return
         except TimeoutError:
             pass
 
         # SIGKILL
-        logger.warning("ACP agent %r did not exit; sending SIGKILL", self.agent_name)
+        logger.warning("acp_agent_sigkill", agent_name=self.agent_name)
         try:
             self._process.kill()
         except ProcessLookupError:
             return
 
         await self._process.wait()
-        logger.info("ACP agent %r killed", self.agent_name)
+        logger.info("acp_agent_killed", agent_name=self.agent_name)
 
     async def _send_request(
         self, method: str, params: dict[str, Any]

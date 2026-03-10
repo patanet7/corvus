@@ -11,12 +11,13 @@ This proxy makes K2 look like an Anthropic-compatible API endpoint.
 from __future__ import annotations
 
 import json
-import logging
 import uuid
 from typing import Any
 
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse, StreamingResponse
+
+import structlog
 
 from corvus.kimi_bridge import (
     PromptResult,
@@ -25,7 +26,7 @@ from corvus.kimi_bridge import (
     StopReason,
 )
 
-logger = logging.getLogger("corvus-gateway.kimi-proxy")
+logger = structlog.get_logger(__name__)
 
 
 def create_proxy_app(bridge: Any = None) -> FastAPI:

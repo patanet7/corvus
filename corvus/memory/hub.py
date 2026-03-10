@@ -10,7 +10,6 @@ Handles:
 
 from __future__ import annotations
 
-import logging
 import math
 from collections.abc import Callable
 from datetime import UTC, datetime
@@ -19,6 +18,7 @@ from typing import Any, Protocol, runtime_checkable
 from corvus.memory.backends.fts5 import FTS5Backend
 from corvus.memory.backends.protocol import HealthStatus, MemoryBackend
 from corvus.memory.config import MemoryConfig
+import structlog
 from corvus.memory.record import MemoryRecord
 
 
@@ -29,7 +29,7 @@ class MemoryAccessResolver(Protocol):
     def __call__(self, agent_name: str) -> dict[str, Any]: ...
 
 
-logger = logging.getLogger(__name__)
+logger = structlog.get_logger(__name__)
 
 
 def _safe_memory_access(agent_name: str) -> dict[str, Any]:
@@ -140,9 +140,9 @@ class MemoryHub:
                 count = self._overlay_failures.get(id(overlay), 0) + 1
                 self._overlay_failures[id(overlay)] = count
                 logger.warning(
-                    "Overlay save failed for record %s (consecutive failures: %d)",
-                    record.id,
-                    count,
+                    "overlay_save_failed",
+                    record_id=record.id,
+                    consecutive_failures=count,
                     exc_info=True,
                 )
 
@@ -204,9 +204,9 @@ class MemoryHub:
                 count = self._overlay_failures.get(id(overlay), 0) + 1
                 self._overlay_failures[id(overlay)] = count
                 logger.warning(
-                    "Overlay update failed for %s (consecutive failures: %d)",
-                    record_id,
-                    count,
+                    "overlay_update_failed",
+                    record_id=record_id,
+                    consecutive_failures=count,
                     exc_info=True,
                 )
 
@@ -247,8 +247,8 @@ class MemoryHub:
                 count = self._overlay_failures.get(id(overlay), 0) + 1
                 self._overlay_failures[id(overlay)] = count
                 logger.warning(
-                    "Overlay search failed (consecutive failures: %d)",
-                    count,
+                    "overlay_search_failed",
+                    consecutive_failures=count,
                     exc_info=True,
                 )
 
@@ -326,9 +326,9 @@ class MemoryHub:
                 count = self._overlay_failures.get(id(overlay), 0) + 1
                 self._overlay_failures[id(overlay)] = count
                 logger.warning(
-                    "Overlay forget failed for %s (consecutive failures: %d)",
-                    record_id,
-                    count,
+                    "overlay_forget_failed",
+                    record_id=record_id,
+                    consecutive_failures=count,
                     exc_info=True,
                 )
 
@@ -385,7 +385,7 @@ class MemoryHub:
                 if age_days > 0:
                     r.score *= math.exp(-lam * age_days)
             except (ValueError, TypeError):
-                logger.debug("Skipping decay for record %s: bad created_at=%r", r.id, r.created_at)
+                logger.debug("decay_skipped", record_id=r.id, created_at=r.created_at)
 
         return results
 
@@ -411,7 +411,7 @@ class MemoryHub:
                 readable_domains=readable,
             )
         except Exception:
-            logger.warning("seed_context failed for %s", agent_name, exc_info=True)
+            logger.warning("seed_context_failed", agent_name=agent_name, exc_info=True)
             return []
 
         # Apply temporal decay to sort by relevance
@@ -481,4 +481,4 @@ class MemoryHub:
                 visibility,
             )
         except Exception:
-            logger.error("Audit write failed", exc_info=True)
+            logger.error("audit_write_failed", exc_info=True)

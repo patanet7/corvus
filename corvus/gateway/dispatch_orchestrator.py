@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import asyncio
 import json
-import logging
+import structlog
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
@@ -23,7 +23,7 @@ if TYPE_CHECKING:
     from corvus.gateway.chat_engine import ChatDispatchResolution
     from corvus.gateway.chat_session import ChatSession, TurnContext
 
-logger = logging.getLogger("corvus-gateway")
+logger = structlog.get_logger(__name__)
 
 
 async def dispatch_control_listener(session: ChatSession) -> None:
@@ -51,7 +51,7 @@ async def dispatch_control_listener(session: ChatSession) -> None:
         control_type = control_msg.get("type")
         if control_type == "interrupt":
             session.runtime.dispatch_controls.request_interrupt(turn.dispatch_id, user=session.user, source="ws")
-            logger.info("User interrupted dispatch %s", turn.dispatch_id)
+            logger.info("user_interrupted_dispatch", dispatch_id=turn.dispatch_id)
             await session.runtime.emitter.emit("session_interrupt", user=session.user, session_id=session.session_id)
             await session.send(
                 {
@@ -130,7 +130,7 @@ async def execute_dispatch_lifecycle(
             status="routing",
         )
     except Exception:
-        logger.exception("Failed to persist dispatch row dispatch_id=%s", dispatch_id)
+        logger.exception("persist_dispatch_row_failed", dispatch_id=dispatch_id)
 
     await session.send(
         {
@@ -265,7 +265,7 @@ async def execute_dispatch_lifecycle(
             }
         )
     except Exception:
-        logger.exception("Dispatch failed dispatch_id=%s", dispatch_id)
+        logger.exception("dispatch_failed", dispatch_id=dispatch_id)
         session.runtime.session_mgr.update_dispatch(
             dispatch_id,
             status="error",
@@ -289,7 +289,7 @@ async def execute_dispatch_lifecycle(
             except WebSocketDisconnect:
                 raise
             except Exception:
-                logger.exception("Dispatch control listener failed")
+                logger.exception("dispatch_control_listener_failed")
         session.runtime.dispatch_controls.unregister(dispatch_id)
         session._current_turn = None
         session.confirm_queue.cancel_all()

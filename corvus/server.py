@@ -14,12 +14,12 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-import logging
 import os
 from collections.abc import AsyncGenerator
 from pathlib import Path
 from contextlib import asynccontextmanager
 
+import structlog
 import uvicorn
 from claude_agent_sdk import ClaudeAgentOptions
 from fastapi import FastAPI, WebSocket
@@ -48,9 +48,10 @@ from corvus.config import HOST, PORT
 from corvus.gateway.options import any_llm_configured, build_options as build_runtime_options
 from corvus.gateway.runtime import GatewayRuntime, build_runtime, ensure_dirs, init_credentials
 from corvus.gateway.workspace_runtime import prune_stale_worktrees
+from corvus.logging import configure_logging
 
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger("corvus-gateway")
+configure_logging()
+logger = structlog.get_logger(__name__)
 
 # Strip CLAUDECODE so SDK can spawn its own CLI instances.
 os.environ.pop("CLAUDECODE", None)
@@ -100,39 +101,39 @@ async def lifespan(_app: FastAPI) -> AsyncGenerator[None]:
     try:
         await runtime.litellm_manager.start(Path("config/models.yaml"))
     except Exception as exc:
-        logger.warning("LiteLLM proxy failed to start, using config-based routing: %s", exc)
+        logger.warning("litellm_proxy_failed", error=str(exc), fallback="config_based_routing")
     runtime.model_router.discover_models()
 
     # Prune stale worktrees left from previous sessions
     try:
         pruned = prune_stale_worktrees()
         if pruned:
-            logger.info("Pruned %d stale agent worktrees at startup", pruned)
+            logger.info("pruned_stale_worktrees", count=pruned)
     except Exception:
-        logger.warning("Failed to prune stale worktrees at startup", exc_info=True)
+        logger.warning("prune_stale_worktrees_failed", exc_info=True)
 
     await runtime.supervisor.start()
-    logger.info("AgentSupervisor heartbeat started")
+    logger.info("agent_supervisor_started")
 
     runtime.scheduler.load()
     await runtime.scheduler.start()
-    logger.info("CronScheduler started with %d schedules", len(runtime.scheduler.schedules))
+    logger.info("cron_scheduler_started", schedule_count=len(runtime.scheduler.schedules))
 
     runtime.sdk_client_manager.start_eviction_loop()
-    logger.info("SDKClientManager eviction loop started")
+    logger.info("sdk_client_manager_eviction_started")
 
     yield
 
     await runtime.sdk_client_manager.teardown_all()
-    logger.info("SDKClientManager torn down")
+    logger.info("sdk_client_manager_torn_down")
 
     await runtime.litellm_manager.stop()
 
     await runtime.scheduler.stop()
-    logger.info("CronScheduler stopped")
+    logger.info("cron_scheduler_stopped")
 
     await runtime.supervisor.graceful_shutdown()
-    logger.info("AgentSupervisor stopped")
+    logger.info("agent_supervisor_stopped")
 
 
 app = FastAPI(title="Corvus Gateway", lifespan=lifespan)

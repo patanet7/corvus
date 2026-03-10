@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 import asyncio
-import logging
 from collections.abc import Sequence
+
+import structlog
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import JSONResponse
@@ -14,7 +15,7 @@ from corvus.gateway.trace_hub import TraceHub
 from corvus.security.session_auth import SessionAuthManager
 from corvus.session_manager import SessionManager
 
-logger = logging.getLogger("corvus-gateway")
+logger = structlog.get_logger(__name__)
 
 router = APIRouter(prefix="/api", tags=["traces"])
 ws_router = APIRouter(tags=["traces"])
@@ -169,7 +170,7 @@ async def websocket_trace_stream(websocket: WebSocket):
     trace_hub = _require_trace_hub()
 
     if _session_auth is None:
-        logger.error("/ws/traces: SessionAuthManager not configured — rejecting connection")
+        logger.error("ws_traces_auth_not_configured")
         await websocket.close(code=4401, reason="Auth not configured")
         return
 
@@ -183,9 +184,7 @@ async def websocket_trace_stream(websocket: WebSocket):
         headers=headers,
     )
     if not auth_result.authenticated:
-        logger.debug(
-            "/ws/traces auth denied for %s: %s", client_host, auth_result.reason
-        )
+        logger.debug("ws_traces_auth_denied", client_host=client_host, reason=auth_result.reason)
         await websocket.close(code=4401, reason=auth_result.reason or "Unauthorized")
         return
     user = auth_result.user

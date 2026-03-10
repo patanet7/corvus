@@ -6,7 +6,6 @@ SessionEmitter and forwarded to the TUI via the registered callback.
 """
 
 import json
-import logging
 import uuid
 from collections.abc import Callable, Coroutine
 from datetime import UTC, datetime
@@ -19,9 +18,10 @@ from corvus.gateway.runtime import GatewayRuntime, build_runtime
 from corvus.gateway.workspace_runtime import cleanup_session_workspaces
 from corvus.memory.record import MemoryRecord
 from corvus.tui.protocol.base import GatewayProtocol, SessionDetail, SessionSummary
+import structlog
 from corvus.tui.protocol.events import ProtocolEvent, parse_event
 
-logger = logging.getLogger("corvus-tui.in-process")
+logger = structlog.get_logger(__name__)
 
 
 class InProcessGateway(GatewayProtocol):
@@ -59,27 +59,27 @@ class InProcessGateway(GatewayProtocol):
         # Start LiteLLM proxy (sets ANTHROPIC_BASE_URL for router)
         try:
             await self._runtime.litellm_manager.start(Path("config/models.yaml"))
-            logger.info("LiteLLM proxy started")
+            logger.info("litellm_proxy_started")
         except Exception as exc:
-            logger.warning("LiteLLM proxy failed to start: %s", exc)
+            logger.warning("litellm_proxy_start_failed", error=str(exc))
 
         self._runtime.model_router.discover_models()
 
         # Start supervisor heartbeat
         await self._runtime.supervisor.start()
-        logger.info("AgentSupervisor heartbeat started")
+        logger.info("agent_supervisor_heartbeat_started")
 
         # Start scheduler
         self._runtime.scheduler.load()
         await self._runtime.scheduler.start()
-        logger.info("CronScheduler started")
+        logger.info("cron_scheduler_started")
 
         # Start SDK client eviction loop
         self._runtime.sdk_client_manager.start_eviction_loop()
-        logger.info("SDKClientManager eviction loop started")
+        logger.info("sdk_client_manager_eviction_started")
 
         self._connected = True
-        logger.info("In-process gateway connected (full stack)")
+        logger.info("in_process_gateway_connected")
 
     async def disconnect(self) -> None:
         """Tear down the runtime — stop LiteLLM, supervisor, scheduler, cleanup workspaces."""
@@ -88,36 +88,36 @@ class InProcessGateway(GatewayProtocol):
             try:
                 await self._runtime.sdk_client_manager.teardown_session(self._session.session_id)
             except Exception:
-                logger.warning("Failed to teardown SDK clients for session %s", self._session.session_id, exc_info=True)
+                logger.warning("sdk_clients_teardown_failed", session_id=self._session.session_id, exc_info=True)
 
         # Clean up session workspaces before tearing down runtime
         if self._session is not None:
             try:
                 cleanup_session_workspaces(session_id=self._session.session_id)
             except Exception:
-                logger.warning("Failed to cleanup workspaces for session %s", self._session.session_id)
+                logger.warning("workspace_cleanup_failed", session_id=self._session.session_id)
 
         if self._runtime is not None:
             try:
                 await self._runtime.sdk_client_manager.teardown_all()
             except Exception as exc:
-                logger.warning("Failed to teardown SDK client manager: %s", exc)
+                logger.warning("sdk_client_manager_teardown_failed", error=str(exc))
             try:
                 await self._runtime.litellm_manager.stop()
             except Exception as exc:
-                logger.warning("Failed to stop LiteLLM manager: %s", exc)
+                logger.warning("litellm_manager_stop_failed", error=str(exc))
             try:
                 await self._runtime.supervisor.graceful_shutdown()
             except Exception as exc:
-                logger.warning("Failed to stop supervisor: %s", exc)
+                logger.warning("supervisor_stop_failed", error=str(exc))
             try:
                 await self._runtime.scheduler.stop()
             except Exception as exc:
-                logger.warning("Failed to stop scheduler: %s", exc)
+                logger.warning("scheduler_stop_failed", error=str(exc))
         self._session = None
         self._runtime = None
         self._connected = False
-        logger.info("In-process gateway disconnected")
+        logger.info("in_process_gateway_disconnected")
 
     # ------------------------------------------------------------------
     # Messaging
@@ -174,7 +174,7 @@ class InProcessGateway(GatewayProtocol):
                 dispatch_mode_raw=None,
             )
         except Exception as exc:
-            logger.exception("Dispatch resolution failed")
+            logger.exception("dispatch_resolution_failed")
             if callback is not None:
                 error_event = parse_event({
                     "type": "error",
@@ -208,7 +208,7 @@ class InProcessGateway(GatewayProtocol):
                 requires_tools=False,
             )
         except Exception as exc:
-            logger.exception("Dispatch execution failed")
+            logger.exception("dispatch_execution_failed")
             if callback is not None:
                 error_event = parse_event({
                     "type": "error",

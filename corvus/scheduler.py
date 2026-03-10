@@ -12,12 +12,12 @@ from __future__ import annotations
 import asyncio
 import enum
 import json
-import logging
 import sqlite3
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+import structlog
 import yaml
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
@@ -25,7 +25,7 @@ from pydantic import BaseModel
 
 from corvus.events import EventEmitter
 
-logger = logging.getLogger("corvus-gateway.scheduler")
+logger = structlog.get_logger(__name__)
 
 
 # ---------------------------------------------------------------------------
@@ -113,33 +113,33 @@ def load_schedule_config(config_path: Path) -> dict[str, ScheduleEntry]:
     Returns an empty dict if the file is missing or malformed (fail-open).
     """
     if not config_path.exists():
-        logger.warning("Schedule config not found at %s — using empty defaults", config_path)
+        logger.warning("schedule_config_not_found", path=str(config_path))
         return {}
 
     try:
         raw = yaml.safe_load(config_path.read_text())
     except Exception:
-        logger.warning("Failed to parse schedule config at %s", config_path, exc_info=True)
+        logger.warning("schedule_config_parse_failed", path=str(config_path), exc_info=True)
         return {}
 
     if not isinstance(raw, dict) or "schedules" not in raw:
-        logger.warning("Schedule config at %s has no 'schedules' key", config_path)
+        logger.warning("schedule_config_missing_key", path=str(config_path), key="schedules")
         return {}
 
     entries: dict[str, ScheduleEntry] = {}
     schedules = raw["schedules"]
     if not isinstance(schedules, dict):
-        logger.warning("'schedules' key in %s is not a mapping", config_path)
+        logger.warning("schedule_config_invalid_type", path=str(config_path))
         return {}
 
     for name, data in schedules.items():
         try:
             if not isinstance(data, dict):
-                logger.warning("Schedule '%s' is not a mapping — skipping", name)
+                logger.warning("schedule_entry_not_mapping", name=name)
                 continue
             entries[name] = ScheduleEntry(name=name, **data)
         except Exception:
-            logger.warning("Invalid schedule entry '%s' — skipping", name, exc_info=True)
+            logger.warning("schedule_entry_invalid", name=name, exc_info=True)
 
     return entries
 
@@ -302,9 +302,9 @@ class CronScheduler:
         finally:
             conn.close()
         logger.info(
-            "Loaded %d schedules (%d enabled)",
-            len(self._schedules),
-            sum(1 for s in self._schedules.values() if s.enabled),
+            "schedules_loaded",
+            total=len(self._schedules),
+            enabled=sum(1 for s in self._schedules.values() if s.enabled),
         )
         return self._schedules
 
@@ -319,11 +319,7 @@ class CronScheduler:
             try:
                 trigger = CronTrigger.from_crontab(entry.cron)
             except ValueError:
-                logger.warning(
-                    "Invalid cron expression '%s' for schedule '%s' — skipping",
-                    entry.cron,
-                    name,
-                )
+                logger.warning("schedule_invalid_cron", name=name, cron=entry.cron)
                 continue
             self._scheduler.add_job(
                 self._run_job,
@@ -334,10 +330,10 @@ class CronScheduler:
                 max_instances=3,
                 replace_existing=True,
             )
-            logger.debug("Registered cron job: %s [%s]", name, entry.cron)
+            logger.debug("schedule_job_registered", name=name, cron=entry.cron)
 
         self._scheduler.start()
-        logger.info("CronScheduler started")
+        logger.info("cron_scheduler_started")
 
     async def stop(self) -> None:
         """Shut down the APScheduler."""
@@ -345,7 +341,7 @@ class CronScheduler:
             self._scheduler.shutdown(wait=False)
             # AsyncIOScheduler processes shutdown on the next event-loop tick
             await asyncio.sleep(0)
-            logger.info("CronScheduler stopped")
+            logger.info("cron_scheduler_stopped")
 
     # -- Job execution -------------------------------------------------------
 
@@ -353,7 +349,7 @@ class CronScheduler:
         """Execute a scheduled job: dispatch, emit events, update DB."""
         entry = self._schedules.get(schedule_name)
         if entry is None:
-            logger.error("Unknown schedule: %s", schedule_name)
+            logger.error("schedule_unknown", name=schedule_name)
             return
 
         started_at = datetime.now(UTC).isoformat()
@@ -375,11 +371,11 @@ class CronScheduler:
         except asyncio.CancelledError:
             status = "error"
             detail = "cancelled"
-            logger.warning("Schedule '%s' was cancelled", schedule_name)
+            logger.warning("schedule_cancelled", name=schedule_name)
         except Exception as exc:
             status = "error"
             detail = str(exc)
-            logger.exception("Schedule '%s' failed", schedule_name)
+            logger.exception("schedule_failed", name=schedule_name)
 
         finished_at = datetime.now(UTC)
 

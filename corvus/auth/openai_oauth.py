@@ -12,7 +12,6 @@ Handles the full OAuth flow:
 import base64
 import hashlib
 import json
-import logging
 import secrets
 import time
 import urllib.error
@@ -22,7 +21,9 @@ from typing import Any
 from urllib.parse import parse_qs, urlencode, urlparse
 from urllib.request import Request, urlopen
 
-logger = logging.getLogger(__name__)
+import structlog
+
+logger = structlog.get_logger(__name__)
 
 OPENAI_AUTH_BASE = "https://auth.openai.com"
 OPENAI_AUTHORIZE_URL = f"{OPENAI_AUTH_BASE}/oauth/authorize"
@@ -93,7 +94,7 @@ def decode_jwt_account_id(token: str) -> str:
         payload = json.loads(base64.urlsafe_b64decode(payload_b64))
         return payload.get("https://api.openai.com/auth", {}).get("chatgpt_account_id", "")
     except (IndexError, ValueError, json.JSONDecodeError, UnicodeDecodeError):
-        logger.warning("Failed to decode account_id from JWT")
+        logger.warning("jwt_account_id_decode_failed")
         return ""
 
 

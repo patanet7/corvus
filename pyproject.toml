@@ -30,6 +30,7 @@ dependencies = [
     "prompt_toolkit",
     "agent-client-protocol>=0.8.1",
     "rich>=14.3.3",
+    "structlog>=25.5.0",
 ]
 
 [project.optional-dependencies]

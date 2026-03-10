@@ -4,11 +4,11 @@ Manages in-memory state for ACP agent sessions — tracking process PIDs,
 session IDs, and lifecycle status.
 """
 
-import logging
+import structlog
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 
-logger = logging.getLogger(__name__)
+logger = structlog.get_logger(__name__)
 
 
 @dataclass
@@ -56,10 +56,10 @@ class AcpSessionTracker:
         )
         self._sessions[corvus_run_id] = state
         logger.info(
-            "Created ACP session: run_id=%s agent=%s pid=%d",
-            corvus_run_id,
-            acp_agent,
-            process_pid,
+            "acp_session_created",
+            run_id=corvus_run_id,
+            agent=acp_agent,
+            pid=process_pid,
         )
         return state
 
@@ -71,16 +71,10 @@ class AcpSessionTracker:
         """Update the status of an existing session."""
         state = self._sessions.get(corvus_run_id)
         if state is None:
-            logger.warning(
-                "Cannot update status: unknown run_id=%s", corvus_run_id
-            )
+            logger.warning("acp_session_update_status_unknown", run_id=corvus_run_id)
             return
         state.status = status
-        logger.info(
-            "Updated ACP session status: run_id=%s status=%s",
-            corvus_run_id,
-            status,
-        )
+        logger.info("acp_session_status_updated", run_id=corvus_run_id, status=status)
 
     def set_acp_session_id(
         self, corvus_run_id: str, acp_session_id: str
@@ -88,26 +82,18 @@ class AcpSessionTracker:
         """Set the ACP-level session ID on an existing session."""
         state = self._sessions.get(corvus_run_id)
         if state is None:
-            logger.warning(
-                "Cannot set acp_session_id: unknown run_id=%s", corvus_run_id
-            )
+            logger.warning("acp_session_set_id_unknown", run_id=corvus_run_id)
             return
         state.acp_session_id = acp_session_id
-        logger.info(
-            "Set ACP session ID: run_id=%s acp_session_id=%s",
-            corvus_run_id,
-            acp_session_id,
-        )
+        logger.info("acp_session_id_set", run_id=corvus_run_id, acp_session_id=acp_session_id)
 
     def remove(self, corvus_run_id: str) -> None:
         """Remove a session from tracking."""
         removed = self._sessions.pop(corvus_run_id, None)
         if removed:
-            logger.info("Removed ACP session: run_id=%s", corvus_run_id)
+            logger.info("acp_session_removed", run_id=corvus_run_id)
         else:
-            logger.warning(
-                "Cannot remove: unknown run_id=%s", corvus_run_id
-            )
+            logger.warning("acp_session_remove_unknown", run_id=corvus_run_id)
 
     def list_by_session(
         self, corvus_session_id: str

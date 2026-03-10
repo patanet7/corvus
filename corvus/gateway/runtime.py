@@ -6,7 +6,7 @@ scheduler, supervisor) so server.py can stay as a thin composition root.
 
 from __future__ import annotations
 
-import logging
+import structlog
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -47,7 +47,7 @@ from corvus.scheduler import CronScheduler
 from corvus.session_manager import SessionManager
 from corvus.supervisor import AgentSupervisor
 
-logger = logging.getLogger("corvus-gateway")
+logger = structlog.get_logger(__name__)
 
 
 @dataclass(slots=True)
@@ -81,13 +81,14 @@ def init_credentials() -> None:
         store.inject()
         register_credential_patterns(store.credential_values())
         logger.info(
-            "Credentials loaded from SOPS store, %d patterns registered",
-            len(store.credential_values()),
+            "credentials_loaded",
+            source="sops",
+            pattern_count=len(store.credential_values()),
         )
     except (FileNotFoundError, OSError) as exc:
-        logger.info("No SOPS credential store found (%s), using env var fallback", type(exc).__name__)
+        logger.info("no_sops_store_found", error_type=type(exc).__name__)
     except ValueError as exc:
-        logger.warning("SOPS credential store malformed: %s", exc)
+        logger.warning("sops_store_malformed", error=str(exc))
 
 
 def _build_router_agent(agent_registry: AgentRegistry, model_router: ModelRouter) -> RouterAgent:
@@ -141,9 +142,9 @@ def _build_memory_overlays(memory_config: MemoryConfig) -> list[MemoryBackend]:
                     )
                 )
             else:
-                logger.warning("Memory overlay '%s' is not supported; ignoring", overlay_cfg.name)
+                logger.warning("unsupported_memory_overlay", overlay=overlay_cfg.name)
         except Exception:
-            logger.exception("Failed to initialize memory overlay '%s'; skipping", overlay_cfg.name)
+            logger.exception("memory_overlay_init_failed", overlay=overlay_cfg.name)
     return overlays
 
 
@@ -158,7 +159,7 @@ def build_runtime() -> GatewayRuntime:
 
     agent_registry = AgentRegistry(config_dir=Path("config/agents"))
     agent_registry.load()
-    logger.info("AgentRegistry loaded %d agents", len(agent_registry.list_all()))
+    logger.info("agent_registry_loaded", agent_count=len(agent_registry.list_all()))
 
     capabilities_registry = CapabilitiesRegistry()
     module_defs_by_name = {module_def.name: module_def for module_def in TOOL_MODULE_DEFS}
@@ -168,10 +169,10 @@ def build_runtime() -> GatewayRuntime:
     for module_name in enabled_modules:
         capabilities_registry.register(module_name, module_defs_by_name[module_name])
     logger.info(
-        "CapabilitiesRegistry loaded %d modules from %s: %s",
-        len(capabilities_registry.list_available()),
-        CAPABILITIES_CONFIG,
-        enabled_modules,
+        "capabilities_registry_loaded",
+        module_count=len(capabilities_registry.list_available()),
+        config_path=str(CAPABILITIES_CONFIG),
+        modules=enabled_modules,
     )
 
     supervisor = AgentSupervisor(registry=capabilities_registry, emitter=emitter)
@@ -180,10 +181,10 @@ def build_runtime() -> GatewayRuntime:
     memory_overlays = _build_memory_overlays(memory_config)
     memory_hub = MemoryHub(memory_config, overlays=memory_overlays)
     logger.info(
-        "MemoryHub initialized (primary=%s, overlays=%d configured=%d)",
-        memory_config.primary_db_path,
-        len(memory_overlays),
-        len(memory_config.enabled_overlays()),
+        "memory_hub_initialized",
+        primary_db=str(memory_config.primary_db_path),
+        overlay_count=len(memory_overlays),
+        configured_count=len(memory_config.enabled_overlays()),
     )
     agents_hub = AgentsHub(
         registry=agent_registry,
@@ -201,9 +202,9 @@ def build_runtime() -> GatewayRuntime:
     hub_errors = memory_hub.validate_ready()
     if hub_errors:
         for err in hub_errors:
-            logger.error("Startup validation FAILED: %s", err)
+            logger.error("startup_validation_failed", error=err)
         raise RuntimeError(f"AgentsHub startup validation failed: {'; '.join(hub_errors)}")
-    logger.info("AgentsHub initialized and validated")
+    logger.info("agents_hub_initialized")
 
     router_agent = _build_router_agent(agent_registry=agent_registry, model_router=model_router)
     session_mgr = SessionManager(db_path=MEMORY_DB)
@@ -221,7 +222,7 @@ def build_runtime() -> GatewayRuntime:
 
     acp_registry = AcpAgentRegistry(config_dir=Path("config"))
     acp_registry.load()
-    logger.info("AcpAgentRegistry loaded %d agents", len(acp_registry.list_agents()))
+    logger.info("acp_registry_loaded", agent_count=len(acp_registry.list_agents()))
 
     sdk_client_manager = SDKClientManager(runtime=None)
 

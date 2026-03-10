@@ -4,14 +4,14 @@ Provides AcpAgentEntry (frozen dataclass) and AcpAgentRegistry for
 config-driven lookup of ACP-compatible coding agents (Codex, Gemini, etc.).
 """
 
-import logging
 import shlex
 from dataclasses import dataclass
 from pathlib import Path
 
+import structlog
 import yaml
 
-logger = logging.getLogger(__name__)
+logger = structlog.get_logger(__name__)
 
 CONFIG_FILENAME = "acp_agents.yaml"
 
@@ -48,7 +48,7 @@ class AcpAgentRegistry:
         """
         config_path = self._config_dir / CONFIG_FILENAME
         if not config_path.exists():
-            logger.warning("ACP agents config not found: %s", config_path)
+            logger.warning("acp_agents_config_not_found", config_path=str(config_path))
             self._agents = {}
             return
 
@@ -64,7 +64,7 @@ class AcpAgentRegistry:
             )
 
         self._agents = loaded
-        logger.info("Loaded %d ACP agent(s): %s", len(loaded), sorted(loaded.keys()))
+        logger.info("acp_agents_loaded", count=len(loaded), agents=sorted(loaded.keys()))
 
     def get(self, name: str) -> AcpAgentEntry | None:
         """Return the agent entry for *name*, or None if not registered."""

@@ -8,16 +8,17 @@ The hook infrastructure (create_hooks, pre/post_tool_use) is still used by
 the gateway path (corvus/gateway/options.py -> build_hooks).
 """
 
-import logging
 import re
 import time
 import uuid as _uuid
 from collections.abc import Awaitable, Callable
 from typing import Any
 
+import structlog
+
 from corvus.events import EventEmitter
 
-logger = logging.getLogger("corvus-gateway")
+logger = structlog.get_logger(__name__)
 
 # Type alias for WebSocket forwarding callback
 WSCallback = Callable[[dict], Awaitable[None]]

@@ -5,8 +5,9 @@ policy at resolution time: if an env gate fails, the module is excluded.
 Hooks (corvus/hooks.py) remain for observability/audit only.
 """
 
-import logging
 import os
+
+import structlog
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any, Protocol, runtime_checkable
@@ -14,7 +15,7 @@ from typing import Any, Protocol, runtime_checkable
 # Type alias for MCP server objects returned by create_sdk_mcp_server()
 McpServer = Any  # SDK returns opaque server objects
 
-logger = logging.getLogger("corvus.capabilities")
+logger = structlog.get_logger(__name__)
 
 
 def _has_required_env_value(var_name: str) -> bool:
@@ -113,7 +114,7 @@ class CapabilitiesRegistry:
         if name in self._modules:
             raise ValueError(f"Module '{name}' is already registered. Duplicate module registration is not allowed.")
         self._modules[name] = module
-        logger.info("Registered tool module: %s", name)
+        logger.info("tool_module_registered", module=name)
 
     def resolve(
         self,
@@ -166,11 +167,7 @@ class CapabilitiesRegistry:
                 result.unavailable_modules[module_name] = (
                     f"Module '{module_name}' is not registered in the capabilities registry."
                 )
-                logger.warning(
-                    "Agent '%s' requested unregistered module '%s'",
-                    agent_spec.name,
-                    module_name,
-                )
+                logger.warning("unregistered_module_requested", agent=agent_spec.name, module=module_name)
                 continue
 
             # Check env gates (deny-wins: ALL required env vars must be present and non-empty)
@@ -179,12 +176,7 @@ class CapabilitiesRegistry:
                 result.unavailable_modules[module_name] = (
                     f"Missing required environment variables: {', '.join(missing_env)}"
                 )
-                logger.info(
-                    "Module '%s' unavailable for agent '%s': missing env %s",
-                    module_name,
-                    agent_spec.name,
-                    missing_env,
-                )
+                logger.info("module_env_gate_failed", module=module_name, agent=agent_spec.name, missing_env=missing_env)
                 continue
 
             # All gates passed — configure, create tools, and build MCP server.
@@ -195,12 +187,7 @@ class CapabilitiesRegistry:
                 server = entry.create_mcp_server(tools, cfg)
             except Exception as exc:
                 result.unavailable_modules[module_name] = f"Module '{module_name}' failed during initialization: {exc}"
-                logger.error(
-                    "Module '%s' init failed for agent '%s': %s",
-                    module_name,
-                    agent_spec.name,
-                    exc,
-                )
+                logger.error("module_init_failed", module=module_name, agent=agent_spec.name, error=str(exc))
                 continue
 
             # Determine server name based on per-agent isolation setting
@@ -211,12 +198,7 @@ class CapabilitiesRegistry:
 
             result.mcp_servers[server_name] = server
             result.available_modules.append(module_name)
-            logger.info(
-                "Resolved module '%s' as server '%s' for agent '%s'",
-                module_name,
-                server_name,
-                agent_spec.name,
-            )
+            logger.info("module_resolved", module=module_name, server=server_name, agent=agent_spec.name)
 
         return result
 
@@ -239,12 +221,7 @@ class CapabilitiesRegistry:
 
         missing_env = [var for var in entry.requires_env if not _has_required_env_value(var)]
         if missing_env:
-            logger.debug(
-                "is_allowed('%s', '%s') -> False: missing env %s",
-                agent_name,
-                tool_name,
-                missing_env,
-            )
+            logger.debug("is_allowed_denied", agent=agent_name, tool=tool_name, missing_env=missing_env)
             return False
 
         return True
