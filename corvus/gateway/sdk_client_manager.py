@@ -318,7 +318,8 @@ class SDKClientManager:
         return len(clients)
 
     async def teardown_all(self) -> int:
-        """Tear down every client across all sessions. Returns total count."""
+        """Tear down every client across all sessions and stop eviction. Returns total count."""
+        await self.stop_eviction_loop()
         all_session_ids = list(self._pools.keys())
         total = 0
         for session_id in all_session_ids:
@@ -359,9 +360,7 @@ class SDKClientManager:
     def start_eviction_loop(self) -> None:
         """Start the background eviction loop."""
         if self._eviction_task is None or self._eviction_task.done():
-            self._eviction_task = asyncio.get_event_loop().create_task(
-                self._eviction_loop()
-            )
+            self._eviction_task = asyncio.create_task(self._eviction_loop())
 
     async def stop_eviction_loop(self) -> None:
         """Stop the background eviction loop."""
