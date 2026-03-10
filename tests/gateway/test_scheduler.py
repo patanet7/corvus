@@ -1189,8 +1189,13 @@ class TestScheduleAPIEndpoints:
 
 
 @skip_no_sdk
+@pytest.mark.slow
+@pytest.mark.skipif(
+    bool(os.environ.get("CLAUDECODE")),
+    reason="Cannot spawn nested Claude Code sessions",
+)
 class TestSchedulerPlannerDispatch:
-    """Behavioral coverage for planner-driven dispatch in scheduled prompts."""
+    """Behavioral coverage for planner-driven dispatch in scheduled prompts — spawns real SDK subprocesses."""
 
     def test_prompt_schedule_uses_hierarchical_dispatch_and_persists_run_metadata(self, tmp_path: Path):
         marker = f"scheduler-planner-{uuid.uuid4()}"
