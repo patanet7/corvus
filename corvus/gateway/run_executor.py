@@ -12,8 +12,7 @@ import uuid
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
-from claude_agent_sdk import ClaudeSDKClient
-from claude_agent_sdk.types import AssistantMessage, ResultMessage, TextBlock
+from claude_agent_sdk import ClaudeAgentOptions
 
 from corvus.gateway.acp_executor import execute_acp_run as _execute_acp_run
 from corvus.gateway.options import (
@@ -22,6 +21,8 @@ from corvus.gateway.options import (
     ui_default_model,
     ui_model_id,
 )
+from corvus.gateway.sdk_client_manager import SDKClientManager
+from corvus.gateway.stream_processor import RunContext, StreamProcessor
 from corvus.gateway.workspace_runtime import prepare_agent_workspace
 
 if TYPE_CHECKING:
@@ -75,6 +76,7 @@ async def execute_agent_run(
     websocket: WebSocket | None,
     user: str,
     confirm_queue: ConfirmQueue | None,
+    sdk_manager: SDKClientManager,
 ) -> dict[str, Any]:
     """Execute a single agent run for one route in a dispatch plan.
 
@@ -276,138 +278,104 @@ async def execute_agent_run(
                 turn_id=turn.turn_id,
             )
 
-        client_options = build_backend_options(
-            runtime=runtime,
-            user=user,
-            websocket=websocket,
-            backend_name=backend_name,
-            active_model=active_model,
-            agent_name=agent_name,
-            ws_callback=_run_hook_ws_callback,
-            allow_secret_access=runtime.break_glass.is_active(
-                user=user, session_id=session_id
-            ),
-            workspace_cwd=workspace_cwd,
-            session_id=session_id,
-            confirm_queue=confirm_queue,
+        def _options_builder() -> ClaudeAgentOptions:
+            return build_backend_options(
+                runtime=runtime,
+                user=user,
+                websocket=websocket,
+                backend_name=backend_name,
+                active_model=active_model,
+                agent_name=agent_name,
+                ws_callback=_run_hook_ws_callback,
+                allow_secret_access=runtime.break_glass.is_active(
+                    user=user, session_id=session_id
+                ),
+                workspace_cwd=workspace_cwd,
+                session_id=session_id,
+                confirm_queue=confirm_queue,
+            )
+
+        managed = await sdk_manager.get_or_create(session_id, agent_name, _options_builder)
+        managed.active_run = True
+
+        try:
+            await managed.client.set_model(active_model)
+        except Exception as exc:
+            logger.warning("Failed to set model '%s': %s", active_model, exc)
+            await send(
+                {
+                    "type": "error",
+                    "error": "model_unavailable",
+                    "model": active_model_id,
+                    "message": f"Selected model unavailable: {active_model_id}",
+                    "agent": agent_name,
+                    **route_pay,
+                }
+            )
+            sdk_manager.release(session_id, agent_name)
+            return await emit_run_failure(
+                turn,
+                run_id=run_id,
+                task_id=task_id,
+                agent=agent_name,
+                route_payload=route_pay,
+                error_type="model_unavailable",
+                summary="Selected model unavailable.",
+                context_limit=context_limit,
+            )
+
+        # Phase: planning + executing
+        await emit_phase(
+            turn,
+            run_id=run_id,
+            task_id=task_id,
+            agent=agent_name,
+            route_payload=route_pay,
+            phase="planning",
+            summary="Preparing execution plan",
+        )
+        await emit_phase(
+            turn,
+            run_id=run_id,
+            task_id=task_id,
+            agent=agent_name,
+            route_payload=route_pay,
+            phase="executing",
+            summary="Agent execution started",
         )
 
-        async with ClaudeSDKClient(options=client_options) as client:
-            try:
-                await client.set_model(active_model)
-            except Exception as exc:
-                logger.warning("Failed to set model '%s': %s", active_model, exc)
-                await send(
-                    {
-                        "type": "error",
-                        "error": "model_unavailable",
-                        "model": active_model_id,
-                        "message": f"Selected model unavailable: {active_model_id}",
-                        "agent": agent_name,
-                        **route_pay,
-                    }
-                )
-                return await emit_run_failure(
-                    turn,
-                    run_id=run_id,
-                    task_id=task_id,
-                    agent=agent_name,
-                    route_payload=route_pay,
-                    error_type="model_unavailable",
-                    summary="Selected model unavailable.",
-                    context_limit=context_limit,
-                )
+        run_context = RunContext(
+            dispatch_id=turn.dispatch_id,
+            run_id=run_id,
+            task_id=task_id,
+            session_id=session_id,
+            turn_id=turn.turn_id,
+            agent_name=agent_name,
+            model_id=active_model_id,
+            route_payload=route_pay,
+        )
+        processor = StreamProcessor(
+            emitter=emitter,
+            managed_client=managed,
+            context_limit=context_limit,
+        )
 
-            # Phase: planning + executing
-            await emit_phase(
-                turn,
-                run_id=run_id,
-                task_id=task_id,
-                agent=agent_name,
-                route_payload=route_pay,
-                phase="planning",
-                summary="Preparing execution plan",
-            )
-            await emit_phase(
-                turn,
-                run_id=run_id,
-                task_id=task_id,
-                agent=agent_name,
-                route_payload=route_pay,
-                phase="executing",
-                summary="Agent execution started",
+        await sdk_manager.query(session_id, agent_name, run_message)
+        result = await processor.process_response(run_context)
+
+        sdk_manager.release(session_id, agent_name)
+
+        # Store SDK session ID for future resume
+        if result.sdk_session_id and hasattr(runtime.session_mgr, "store_sdk_session_id"):
+            runtime.session_mgr.store_sdk_session_id(
+                session_id, agent_name, result.sdk_session_id,
             )
 
-            await client.query(run_message, session_id=session_id)
-            async for sdk_message in client.receive_response():
-                if turn.dispatch_interrupted.is_set():
-                    raise asyncio.CancelledError
-                if isinstance(sdk_message, AssistantMessage):
-                    for block in sdk_message.content:
-                        if not isinstance(block, TextBlock):
-                            continue
-                        response_parts.append(block.text)
-                        assistant_summary = _preview_summary(
-                            " ".join(response_parts), limit=140
-                        )
-                        await send(
-                            {
-                                "type": "run_output_chunk",
-                                "dispatch_id": turn.dispatch_id,
-                                "run_id": run_id,
-                                "task_id": task_id,
-                                "session_id": session_id,
-                                "turn_id": turn.turn_id,
-                                "agent": agent_name,
-                                "model": active_model_id,
-                                "chunk_index": chunk_index,
-                                "content": block.text,
-                                "final": False,
-                                **route_pay,
-                            },
-                            persist=True,
-                            run_id=run_id,
-                            dispatch_id=turn.dispatch_id,
-                            turn_id=turn.turn_id,
-                        )
-                        chunk_index += 1
-                        await send(
-                            {
-                                "type": "text",
-                                "content": block.text,
-                                "agent": agent_name,
-                                "model": active_model_id,
-                                "run_id": run_id,
-                                **route_pay,
-                            }
-                        )
-                        await send(
-                            {
-                                "type": "task_progress",
-                                "task_id": task_id,
-                                "agent": agent_name,
-                                "status": "streaming",
-                                "summary": assistant_summary or "Streaming response...",
-                                "session_id": session_id,
-                                "turn_id": turn.turn_id,
-                                **route_pay,
-                            },
-                            persist=True,
-                            run_id=run_id,
-                            dispatch_id=turn.dispatch_id,
-                            turn_id=turn.turn_id,
-                        )
-                elif isinstance(sdk_message, ResultMessage):
-                    usage = getattr(sdk_message, "usage", None) or {}
-                    tokens_used = int(usage.get("input_tokens", 0)) + int(
-                        usage.get("output_tokens", 0),
-                    )
-                    total_cost = float(getattr(sdk_message, "total_cost_usd", 0.0) or 0.0)
-                    context_pct = (
-                        round((tokens_used / context_limit) * 100, 1)
-                        if context_limit > 0
-                        else 0.0
-                    )
+        tokens_used = result.tokens_used
+        total_cost = result.cost_usd
+        context_pct = result.context_pct
+        response_parts = [result.response_text] if result.response_text else []
+        assistant_summary = _preview_summary(result.response_text, limit=140) if result.response_text else ""
 
         # Phase: compacting
         await emit_phase(

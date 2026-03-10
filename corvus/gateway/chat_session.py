@@ -258,6 +258,7 @@ class ChatSession:
             websocket=self.websocket,
             user=self.user,
             confirm_queue=self.confirm_queue,
+            sdk_manager=self.runtime.sdk_client_manager,
         )
 
     # ------------------------------------------------------------------
