@@ -134,7 +134,9 @@ class TestServerSourceContracts:
     def test_response_parts_collected(self):
         """response_parts list is used to collect text blocks before appending to transcript."""
         assert "response_parts: list[str] = []" in self.run_executor_source
-        assert "response_parts.append(block.text)" in self.run_executor_source
+        # SDK integration: response_parts built from StreamProcessor result
+        assert "response_parts" in self.run_executor_source
+        assert "result.response_text" in self.run_executor_source
 
     def test_imports_memory_config(self):
         """Runtime module still provisions memory paths."""
@@ -175,8 +177,9 @@ class TestServerSourceContracts:
     def test_selected_model_is_applied_before_query(self):
         """WebSocket chat loop must apply active model before querying."""
         src = self.run_executor_source
-        set_model_pos = src.index("await client.set_model(active_model)")
-        query_pos = src.index("await client.query(run_message, session_id=session_id)")
+        # SDK integration: model set via managed client, query via sdk_manager
+        set_model_pos = src.index("await managed.client.set_model(active_model)")
+        query_pos = src.index("await sdk_manager.query(session_id, agent_name, run_message)")
         assert set_model_pos < query_pos
 
     def test_model_unavailable_returns_typed_error(self):

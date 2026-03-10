@@ -12,12 +12,11 @@ import uuid
 from dataclasses import dataclass
 from datetime import UTC, datetime
 
-from corvus.gateway.stream_processor import RunContext, StreamProcessor
-
 from corvus.gateway.dispatch_metrics import summarize_dispatch_runs
 from corvus.gateway.dispatch_runtime import execute_dispatch_runs
 from corvus.gateway.options import build_backend_options, resolve_backend_and_model, ui_model_id
 from corvus.gateway.runtime import GatewayRuntime
+from corvus.gateway.stream_processor import RunContext, StreamProcessor
 from corvus.gateway.task_planner import TaskRoute
 from corvus.gateway.workspace_runtime import cleanup_session_workspaces, prepare_agent_workspace
 

@@ -13,7 +13,6 @@ from pathlib import Path
 from fastapi import WebSocket
 
 from corvus.acp.registry import AcpAgentRegistry
-from corvus.gateway.sdk_client_manager import SDKClientManager
 from corvus.agents.hub import AgentsHub
 from corvus.agents.registry import AgentRegistry
 from corvus.break_glass import BreakGlassManager
@@ -35,6 +34,7 @@ from corvus.config import (
 from corvus.credential_store import get_credential_store
 from corvus.events import EventEmitter, JSONLFileSink
 from corvus.gateway.control_plane import BreakGlassSessionRegistry, DispatchControlRegistry
+from corvus.gateway.sdk_client_manager import SDKClientManager
 from corvus.gateway.task_planner import TaskPlanner
 from corvus.gateway.trace_hub import TraceHub
 from corvus.litellm_manager import LiteLLMManager

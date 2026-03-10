@@ -8,7 +8,8 @@ import os
 
 import pytest
 
-from corvus.gateway.sdk_client_manager import ManagedClient, SDKClientManager
+from corvus.gateway.sdk_client_manager import SDKClientManager
+from tests.conftest import INSIDE_CLAUDE_CODE
 
 pytestmark = [
     pytest.mark.skipif(
@@ -16,7 +17,7 @@ pytestmark = [
         reason="ANTHROPIC_API_KEY not set — skipping SDK integration tests",
     ),
     pytest.mark.skipif(
-        bool(os.environ.get("CLAUDECODE")),
+        INSIDE_CLAUDE_CODE,
         reason="Cannot spawn nested Claude Code sessions — run outside Claude Code",
     ),
 ]
