@@ -366,7 +366,7 @@ async def execute_agent_run(
         sdk_manager.release(session_id, agent_name)
 
         # Store SDK session ID for future resume
-        if result.sdk_session_id and hasattr(runtime.session_mgr, "store_sdk_session_id"):
+        if result.sdk_session_id:
             runtime.session_mgr.store_sdk_session_id(
                 session_id, agent_name, result.sdk_session_id,
             )
