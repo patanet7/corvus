@@ -198,8 +198,16 @@ class StreamProcessor:
     async def _handle_assistant_message(self, message: AssistantMessage, ctx: RunContext) -> None:
         for block in message.content:
             if isinstance(block, TextBlock) and block.text:
+                # Only emit text that hasn't already been streamed via StreamEvent deltas.
                 if not self._text_buffer.endswith(block.text):
-                    self._text_buffer += block.text
+                    new_text = block.text
+                    self._text_buffer += new_text
+                    # Emit as text_delta so the WS client receives the text.
+                    if self._emitter is not None:
+                        await self._emit_action(
+                            {"action": "text_delta", "text": new_text},
+                            ctx,
+                        )
 
     async def _emit_action(self, action: dict[str, Any], ctx: RunContext) -> None:
         if self._emitter is None:

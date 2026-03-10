@@ -87,6 +87,7 @@ _SDK_ENV_PASSTHROUGH: frozenset[str] = frozenset({
     "TMPDIR", "USER", "LOGNAME",
     # LLM provider credentials (injected by SOPS credential store)
     "ANTHROPIC_API_KEY", "ANTHROPIC_BASE_URL",
+    "CLAUDE_CODE_OAUTH_TOKEN",  # OAuth setup tokens (sk-ant-oat01-...)
     "OPENAI_API_KEY", "OLLAMA_BASE_URL",
     "KIMI_BOT_TOKEN",
     "OPENAI_COMPAT_BASE_URL", "OPENAI_COMPAT_API_KEY",
@@ -381,6 +382,7 @@ def any_llm_configured() -> bool:
         os.environ.get(var)
         for var in (
             "ANTHROPIC_API_KEY",
+            "CLAUDE_CODE_OAUTH_TOKEN",
             "OPENAI_API_KEY",
             "OLLAMA_BASE_URL",
             "KIMI_BOT_TOKEN",

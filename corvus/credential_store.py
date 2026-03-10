@@ -214,9 +214,18 @@ class CredentialStore:
             if isinstance(cred, ApiKeyCredential) and cred.key:
                 os.environ[env_var] = cred.key
             elif isinstance(cred, TokenCredential) and cred.token:
-                os.environ[env_var] = cred.token
+                # OAuth setup tokens (sk-ant-oat01-...) must go into
+                # CLAUDE_CODE_OAUTH_TOKEN for the Claude CLI subprocess,
+                # not ANTHROPIC_API_KEY (which expects sk-ant-api03-...).
+                if provider == "anthropic" and cred.token.startswith("sk-ant-oat"):
+                    os.environ["CLAUDE_CODE_OAUTH_TOKEN"] = cred.token
+                else:
+                    os.environ[env_var] = cred.token
             elif isinstance(cred, OAuthCredential) and cred.access_token:
-                os.environ[env_var] = cred.access_token
+                if provider == "anthropic" and cred.access_token.startswith("sk-ant-oat"):
+                    os.environ["CLAUDE_CODE_OAUTH_TOKEN"] = cred.access_token
+                else:
+                    os.environ[env_var] = cred.access_token
 
         # OpenAI-compat needs special handling (base_url in metadata)
         compat_id = resolve_profile(auth_profiles, provider="openai_compat")
@@ -232,7 +241,11 @@ class CredentialStore:
         """Inject credentials from legacy flat credential data."""
         if "anthropic" in self._data:
             api_key = self._data["anthropic"].get("api_key")
-            if api_key:
+            setup_token = self._data["anthropic"].get("setup_token")
+            if setup_token and setup_token.startswith("sk-ant-oat"):
+                # OAuth setup tokens go into CLAUDE_CODE_OAUTH_TOKEN
+                os.environ["CLAUDE_CODE_OAUTH_TOKEN"] = setup_token
+            elif api_key:
                 os.environ["ANTHROPIC_API_KEY"] = api_key
 
         if "openai" in self._data:
