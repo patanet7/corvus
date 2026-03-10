@@ -40,6 +40,7 @@ def test_health_overall_status_degraded_when_no_llm(client, monkeypatch):
     """Status should be degraded when no LLM env vars are set."""
     llm_vars = [
         "ANTHROPIC_API_KEY",
+        "CLAUDE_CODE_OAUTH_TOKEN",
         "OPENAI_API_KEY",
         "OLLAMA_BASE_URL",
         "KIMI_BOT_TOKEN",
