@@ -43,6 +43,20 @@ _HEALTH_TIMEOUT = 30.0
 _HEALTH_POLL_INTERVAL = 0.5
 
 
+def _anthropic_api_key_ref() -> str:
+    """Return the ``os.environ/VAR`` reference for the Anthropic API key.
+
+    Prefers ``ANTHROPIC_API_KEY`` when set.  Falls back to
+    ``CLAUDE_CODE_OAUTH_TOKEN`` (OAuth setup tokens work with the
+    Anthropic API when routed through LiteLLM).
+    """
+    if os.environ.get("ANTHROPIC_API_KEY"):
+        return "os.environ/ANTHROPIC_API_KEY"
+    if os.environ.get("CLAUDE_CODE_OAUTH_TOKEN"):
+        return "os.environ/CLAUDE_CODE_OAUTH_TOKEN"
+    return "os.environ/ANTHROPIC_API_KEY"  # default ref even if unset
+
+
 def generate_litellm_config(models_yaml_path: Path) -> dict[str, Any]:
     """Translate config/models.yaml into a LiteLLM config dict.
 
@@ -60,6 +74,8 @@ def generate_litellm_config(models_yaml_path: Path) -> dict[str, Any]:
     model_list: list[dict[str, Any]] = []
     seen_models: set[str] = set()
 
+    api_key_ref = _anthropic_api_key_ref()
+
     # 1a. SDK-native Claude models (short aliases: sonnet, haiku, opus)
     for short_name, litellm_model in _SDK_MODEL_MAP.items():
         if short_name not in seen_models:
@@ -67,7 +83,7 @@ def generate_litellm_config(models_yaml_path: Path) -> dict[str, Any]:
                 "model_name": short_name,
                 "litellm_params": {
                     "model": litellm_model,
-                    "api_key": "os.environ/ANTHROPIC_API_KEY",
+                    "api_key": api_key_ref,
                 },
             })
             seen_models.add(short_name)
@@ -79,7 +95,7 @@ def generate_litellm_config(models_yaml_path: Path) -> dict[str, Any]:
                 "model_name": model_id,
                 "litellm_params": {
                     "model": litellm_model,
-                    "api_key": "os.environ/ANTHROPIC_API_KEY",
+                    "api_key": api_key_ref,
                 },
             })
             seen_models.add(model_id)
