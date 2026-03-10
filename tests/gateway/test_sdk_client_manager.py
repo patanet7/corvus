@@ -4,7 +4,11 @@ import time
 
 import pytest
 
-from corvus.gateway.sdk_client_manager import AgentClientPool, ManagedClient
+from corvus.gateway.sdk_client_manager import (
+    AgentClientPool,
+    ManagedClient,
+    SDKClientManager,
+)
 
 
 class TestManagedClient:
@@ -104,3 +108,62 @@ class TestAgentClientPool:
         evicted = pool.collect_idle(timeout=600)
         assert len(evicted) == 1
         assert evicted[0].agent_name == "cron-agent"
+
+
+class TestSDKClientManagerLifecycle:
+    def test_pool_created_per_session(self):
+        mgr = SDKClientManager(runtime=None)
+        assert mgr._pools == {}
+
+    def test_get_existing_client(self):
+        mgr = SDKClientManager(runtime=None)
+        mc = ManagedClient.create_stub(session_id="sess-1", agent_name="work")
+        mgr._get_pool("sess-1").add(mc)
+        result = mgr._get_existing("sess-1", "work")
+        assert result is mc
+        assert result.last_activity >= mc.created_at
+
+    def test_get_existing_returns_none_for_missing(self):
+        mgr = SDKClientManager(runtime=None)
+        assert mgr._get_existing("sess-1", "work") is None
+
+    def test_release_marks_inactive(self):
+        mgr = SDKClientManager(runtime=None)
+        mc = ManagedClient.create_stub(session_id="sess-1", agent_name="work")
+        mc.active_run = True
+        mgr._get_pool("sess-1").add(mc)
+        mgr.release("sess-1", "work")
+        assert mc.active_run is False
+
+    def test_teardown_session_clears_pool(self):
+        mgr = SDKClientManager(runtime=None)
+        mc1 = ManagedClient.create_stub(session_id="sess-1", agent_name="work")
+        mc2 = ManagedClient.create_stub(session_id="sess-1", agent_name="codex")
+        pool = mgr._get_pool("sess-1")
+        pool.add(mc1)
+        pool.add(mc2)
+        teardown_list = mgr._collect_session_clients("sess-1")
+        assert len(teardown_list) == 2
+        assert "sess-1" not in mgr._pools
+
+    def test_evict_idle_across_all_pools(self):
+        mgr = SDKClientManager(runtime=None, idle_timeout=600)
+        mc_old = ManagedClient.create_stub(session_id="sess-1", agent_name="old")
+        mc_old.last_activity = time.monotonic() - 700
+        mgr._get_pool("sess-1").add(mc_old)
+
+        mc_new = ManagedClient.create_stub(session_id="sess-2", agent_name="new")
+        mgr._get_pool("sess-2").add(mc_new)
+
+        evicted = mgr._collect_all_idle()
+        assert len(evicted) == 1
+        assert evicted[0].agent_name == "old"
+
+    def test_list_active_clients(self):
+        mgr = SDKClientManager(runtime=None)
+        mc1 = ManagedClient.create_stub(session_id="sess-1", agent_name="work")
+        mc2 = ManagedClient.create_stub(session_id="sess-2", agent_name="codex")
+        mgr._get_pool("sess-1").add(mc1)
+        mgr._get_pool("sess-2").add(mc2)
+        clients = mgr.list_active_clients()
+        assert len(clients) == 2
