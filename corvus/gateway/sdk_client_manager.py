@@ -164,6 +164,7 @@ class SDKClientManager:
         mc = pool.get(agent_name)
         if mc is not None:
             mc.active_run = False
+            mc.last_activity = time.monotonic()
 
     # ── Collection (for teardown/eviction) ───────────────────────────
 
@@ -215,11 +216,12 @@ class SDKClientManager:
         self,
         session_id: str,
         agent_name: str,
-        *,
-        options: ClaudeAgentOptions | None = None,
-        factory: Callable[..., ClaudeSDKClient] | None = None,
+        options_builder: Callable[[], ClaudeAgentOptions],
     ) -> ManagedClient:
-        """Get an existing client or create a new one for the session/agent pair."""
+        """Return existing client or create a new one.
+
+        options_builder is called only when a new client must be created.
+        """
         existing = self._get_existing(session_id, agent_name)
         if existing is not None:
             return existing
@@ -262,11 +264,9 @@ class SDKClientManager:
         self,
         session_id: str,
         agent_name: str,
-        *,
-        sdk_session_id: str | None = None,
-        options: ClaudeAgentOptions | None = None,
+        options_builder: Callable[[], ClaudeAgentOptions],
     ) -> ManagedClient:
-        """Get existing, resume from sdk_session_id, or create new."""
+        """Try resume first (if SDK session ID stored), fall back to fresh."""
         raise NotImplementedError("Implemented in Task 5")
 
     async def fork_session(
