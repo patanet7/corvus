@@ -253,7 +253,32 @@ class SDKClientManager:
                 )
         return result
 
-    # ── Async SDK operations (stubs for Task 2, implemented in later tasks) ──
+    # ── Async SDK operations ────────────────────────────────────────
+
+    async def _create_client(
+        self,
+        session_id: str,
+        agent_name: str,
+        options: ClaudeAgentOptions,
+    ) -> ManagedClient:
+        """Create a new ClaudeSDKClient, connect it, and register in the pool."""
+        client = ClaudeSDKClient(options=options)
+        await client.connect()
+        mc = ManagedClient(
+            client=client,
+            session_id=session_id,
+            agent_name=agent_name,
+            options_snapshot=options,
+            max_turns=options.max_turns,
+            max_budget_usd=options.max_budget_usd,
+            fallback_model=options.fallback_model,
+            checkpointing_enabled=bool(options.enable_file_checkpointing),
+            effort=options.effort,
+        )
+        pool = self._get_pool(session_id)
+        pool.add(mc)
+        log.info("Created SDK client for %s/%s", session_id, agent_name)
+        return mc
 
     async def get_or_create(
         self,
@@ -268,7 +293,8 @@ class SDKClientManager:
         existing = self._get_existing(session_id, agent_name)
         if existing is not None:
             return existing
-        raise NotImplementedError("Full get_or_create implemented in Task 5")
+        options = options_builder()
+        return await self._create_client(session_id, agent_name, options)
 
     async def query(
         self,
@@ -277,31 +303,55 @@ class SDKClientManager:
         prompt: str | AsyncIterable[dict[str, Any]],
     ) -> ManagedClient:
         """Send a prompt to a client and return the ManagedClient (caller streams from it)."""
-        raise NotImplementedError("Implemented in Task 5")
-
-    async def receive_response(self, mc: ManagedClient) -> AsyncIterable[Any]:
-        """Yield stream events from a running client."""
-        raise NotImplementedError("Implemented in Task 5")
+        mc = self._get_existing(session_id, agent_name)
+        if mc is None or mc.client is None:
+            raise RuntimeError(f"No active client for {session_id}/{agent_name}")
+        mc.active_run = True
+        await mc.client.query(prompt, session_id=session_id)
+        return mc
 
     async def interrupt(self, session_id: str, agent_name: str) -> bool:
         """Interrupt an active run. Returns True if interrupted."""
-        raise NotImplementedError("Implemented in Task 5")
+        mc = self._get_existing(session_id, agent_name)
+        if mc is None or mc.client is None or not mc.active_run:
+            return False
+        try:
+            mc.client.interrupt()
+            mc.active_run = False
+            log.info("Interrupted client %s/%s", session_id, agent_name)
+            return True
+        except Exception:
+            log.warning("Failed to interrupt %s/%s", session_id, agent_name, exc_info=True)
+            return False
 
     async def set_model(self, session_id: str, agent_name: str, model: str) -> None:
         """Change the model for an existing client."""
-        raise NotImplementedError("Implemented in Task 5")
+        mc = self._get_existing(session_id, agent_name)
+        if mc is None or mc.client is None:
+            raise RuntimeError(f"No active client for {session_id}/{agent_name}")
+        await mc.client.set_model(model)
 
     async def set_permission_mode(
         self, session_id: str, agent_name: str, mode: str
     ) -> None:
         """Change the permission mode for an existing client."""
-        raise NotImplementedError("Implemented in Task 5")
+        mc = self._get_existing(session_id, agent_name)
+        if mc is None or mc.client is None:
+            raise RuntimeError(f"No active client for {session_id}/{agent_name}")
+        await mc.client.set_permission_mode(mode)
 
     async def resume_sdk_session(
         self, session_id: str, agent_name: str, sdk_session_id: str
     ) -> ManagedClient:
         """Resume a previously persisted SDK session."""
-        raise NotImplementedError("Implemented in Task 5")
+        existing = self._get_existing(session_id, agent_name)
+        if existing is not None:
+            return existing
+        options = ClaudeAgentOptions(resume=sdk_session_id)
+        mc = await self._create_client(session_id, agent_name, options)
+        mc.sdk_session_id = sdk_session_id
+        log.info("Resumed SDK session %s for %s/%s", sdk_session_id, session_id, agent_name)
+        return mc
 
     async def get_or_resume(
         self,
@@ -310,39 +360,95 @@ class SDKClientManager:
         options_builder: Callable[[], ClaudeAgentOptions],
     ) -> ManagedClient:
         """Try resume first (if SDK session ID stored), fall back to fresh."""
-        raise NotImplementedError("Implemented in Task 5")
+        existing = self._get_existing(session_id, agent_name)
+        if existing is not None:
+            return existing
+        # Try to find a stored SDK session ID for resume
+        if self._runtime is not None and hasattr(self._runtime, "session_mgr"):
+            stored_id = self._runtime.session_mgr.get_sdk_session_id(session_id, agent_name)
+            if stored_id:
+                try:
+                    return await self.resume_sdk_session(session_id, agent_name, stored_id)
+                except Exception:
+                    log.warning(
+                        "Failed to resume SDK session %s for %s/%s, creating fresh",
+                        stored_id, session_id, agent_name, exc_info=True,
+                    )
+        options = options_builder()
+        return await self._create_client(session_id, agent_name, options)
 
     async def fork_session(
         self, source_session_id: str, target_session_id: str, agent_name: str
     ) -> ManagedClient:
         """Fork a client from one session into a new session."""
-        raise NotImplementedError("Implemented in Task 8")
+        source = self._get_existing(source_session_id, agent_name)
+        if source is None or source.sdk_session_id is None:
+            raise RuntimeError(
+                f"Cannot fork: no client or SDK session for {source_session_id}/{agent_name}"
+            )
+        options = ClaudeAgentOptions(
+            resume=source.sdk_session_id,
+            fork_session=True,
+        )
+        mc = await self._create_client(target_session_id, agent_name, options)
+        log.info(
+            "Forked SDK session from %s to %s for agent %s",
+            source_session_id, target_session_id, agent_name,
+        )
+        return mc
 
     async def rewind_files(
         self, session_id: str, agent_name: str, checkpoint_uuid: str
     ) -> bool:
         """Rewind file state to a previous checkpoint."""
-        raise NotImplementedError("Implemented in Task 8")
+        mc = self._get_existing(session_id, agent_name)
+        if mc is None or mc.client is None:
+            return False
+        try:
+            mc.client.rewind_files(checkpoint_uuid)
+            log.info("Rewound files for %s/%s to checkpoint %s", session_id, agent_name, checkpoint_uuid)
+            return True
+        except Exception:
+            log.warning(
+                "Failed to rewind files for %s/%s", session_id, agent_name, exc_info=True,
+            )
+            return False
 
     async def get_mcp_status(self, session_id: str, agent_name: str) -> dict[str, Any]:
         """Get MCP server status for a client."""
-        raise NotImplementedError("Implemented in Task 7")
+        mc = self._get_existing(session_id, agent_name)
+        if mc is None or mc.client is None:
+            return {}
+        return mc.client.get_mcp_status()
 
     async def add_mcp_server(
         self, session_id: str, agent_name: str, server_config: dict[str, Any]
     ) -> None:
-        """Add an MCP server to a running client."""
-        raise NotImplementedError("Implemented in Task 7")
+        """Add an MCP server to a running client.
+
+        Note: ClaudeSDKClient does not have a direct add_mcp_server method.
+        MCP servers are configured via ClaudeAgentOptions at creation time.
+        This method is a placeholder for future SDK support.
+        """
+        log.warning("add_mcp_server not yet supported by SDK — config at creation time instead")
 
     async def remove_mcp_server(
         self, session_id: str, agent_name: str, server_name: str
     ) -> None:
-        """Remove an MCP server from a running client."""
-        raise NotImplementedError("Implemented in Task 7")
+        """Remove an MCP server from a running client.
+
+        Note: ClaudeSDKClient does not have a direct remove_mcp_server method.
+        This method is a placeholder for future SDK support.
+        """
+        log.warning("remove_mcp_server not yet supported by SDK")
 
     async def get_server_info(self, session_id: str, agent_name: str) -> dict[str, Any]:
         """Get server info for a client."""
-        raise NotImplementedError("Implemented in Task 7")
+        mc = self._get_existing(session_id, agent_name)
+        if mc is None or mc.client is None:
+            return {}
+        result = mc.client.get_server_info()
+        return result if result is not None else {}
 
     async def teardown_session(self, session_id: str) -> int:
         """Tear down all clients in a session. Returns count of clients torn down."""
